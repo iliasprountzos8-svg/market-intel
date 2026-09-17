@@ -701,6 +701,7 @@ a { color: inherit; }
 
 @media (max-width: 860px) {
   .grid-2col { grid-template-columns: 1fr; }
+  .top-widgets { grid-template-columns: 1fr; }
   .masthead-nav { gap: 16px; flex-wrap: wrap; }
   .page-main { padding: 20px 16px 60px; }
   .headline-rail { grid-template-columns: 1fr; }
@@ -711,6 +712,9 @@ a { color: inherit; }
   .masthead-title { font-size: 32px; }
   .index-strip-inner { padding: 7px 16px; }
   .article-detail-title { font-size: 24px; }
+  .terminal-stats { flex-wrap: wrap; gap: 20px; }
+  .track-summary-stats { gap: 20px; }
+  .page-head h1 { font-size: 24px; }
 }
 /* Command Palette Styles */
 .cmd-overlay {

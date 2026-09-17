@@ -18,6 +18,8 @@ export function MissionControl() {
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [countdown, setCountdown] = useState<string>("--:--");
   const [triggering, setTriggering] = useState(false);
+  const [digestBusy, setDigestBusy] = useState(false);
+  const [digestMsg, setDigestMsg] = useState<string | null>(null);
 
   // Poll API for status
   useEffect(() => {
@@ -75,6 +77,20 @@ export function MissionControl() {
     }
   };
 
+  const handleRequestDigest = async () => {
+    setDigestBusy(true);
+    setDigestMsg(null);
+    try {
+      const res = await fetch("/api/digest/request", { method: "POST" });
+      const json = await res.json();
+      setDigestMsg(res.ok ? `Push: ${json.push}` : "Request failed");
+    } catch (e) {
+      setDigestMsg("Request failed");
+    }
+    setDigestBusy(false);
+    setTimeout(() => setDigestMsg(null), 5000);
+  };
+
   const isRunning = status?.pipeline.status === "running" || triggering;
 
   return (
@@ -113,13 +129,29 @@ export function MissionControl() {
         )}
       </div>
 
-      <button 
-        className="mc-btn-sync" 
-        onClick={handleSyncNow} 
-        disabled={isRunning}
-      >
-        {isRunning ? "[ SYNC IN PROGRESS ]" : "[ SYNC NOW ]"}
-      </button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          className="mc-btn-sync"
+          onClick={handleSyncNow}
+          disabled={isRunning}
+          style={{ flex: 1 }}
+        >
+          {isRunning ? "[ SYNC IN PROGRESS ]" : "[ SYNC NOW ]"}
+        </button>
+        <button
+          className="mc-btn-sync"
+          onClick={handleRequestDigest}
+          disabled={digestBusy}
+          style={{ flex: 1 }}
+        >
+          {digestBusy ? "[ REQUESTING... ]" : "[ REQUEST DIGEST ]"}
+        </button>
+      </div>
+      {digestMsg && (
+        <div className="mc-log" style={{ marginTop: 8 }}>
+          {"> "} {digestMsg}
+        </div>
+      )}
     </div>
   );
 }

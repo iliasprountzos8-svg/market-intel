@@ -26,6 +26,8 @@ export default function SettingsPage() {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [pullBusy, setPullBusy] = useState(false);
+  const [digestBusy, setDigestBusy] = useState(false);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -93,6 +95,30 @@ export default function SettingsPage() {
     setPushBusy(false);
   };
 
+  const handleDataPull = async () => {
+    setPullBusy(true);
+    try {
+      const res = await fetch("/api/pipeline/trigger", { method: "POST" });
+      const json = await res.json();
+      flash(res.ok ? "Data pull dispatched to GitHub Actions." : `Failed: ${json.error ?? res.status}`);
+    } catch (e: any) {
+      flash(`Failed: ${e.message ?? e}`);
+    }
+    setPullBusy(false);
+  };
+
+  const handleDigestRequest = async () => {
+    setDigestBusy(true);
+    try {
+      const res = await fetch("/api/digest/request", { method: "POST" });
+      const json = await res.json();
+      flash(res.ok ? `Requested. Push: ${json.push}. Email: ${json.email}.` : `Failed: ${json.error ?? res.status}`);
+    } catch (e: any) {
+      flash(`Failed: ${e.message ?? e}`);
+    }
+    setDigestBusy(false);
+  };
+
   if (loading || !settings) {
     return (
       <div className="container">
@@ -107,6 +133,52 @@ export default function SettingsPage() {
       <div className="page-head">
         <h1>Settings</h1>
         <div className="sub">Notifications and alert thresholds</div>
+      </div>
+
+      <div className="section-head"><h2>Actions</h2></div>
+      <p className="dim" style={{ marginBottom: 12, fontSize: 13 }}>
+        <strong>Data Pull</strong> runs the real scrape/classify/correlate cycle now
+        (GitHub Actions), same as it does automatically every 30 minutes.{" "}
+        <strong>Request Digest</strong> can&apos;t write the digest itself -- that needs
+        a live Claude session reading and reasoning about articles, by design, to
+        keep this at $0 in AI API cost. It pings your enabled notification
+        channels so you know to open Claude Code and run <code>/digest</code>.
+      </p>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
+        <button
+          onClick={handleDataPull}
+          disabled={pullBusy}
+          style={{
+            background: "transparent",
+            color: "var(--text)",
+            border: "1px solid var(--border-strong)",
+            padding: "10px 18px",
+            borderRadius: "999px",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+            textTransform: "uppercase",
+          }}
+        >
+          {pullBusy ? "Dispatching..." : "Pull Data Now"}
+        </button>
+        <button
+          onClick={handleDigestRequest}
+          disabled={digestBusy}
+          style={{
+            background: "transparent",
+            color: "var(--text)",
+            border: "1px solid var(--border-strong)",
+            padding: "10px 18px",
+            borderRadius: "999px",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+            textTransform: "uppercase",
+          }}
+        >
+          {digestBusy ? "Requesting..." : "Request Digest"}
+        </button>
       </div>
 
       <div className="section-head"><h2>Push Notifications</h2></div>
