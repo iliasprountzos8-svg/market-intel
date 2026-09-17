@@ -715,6 +715,11 @@ a { color: inherit; }
   .terminal-stats { flex-wrap: wrap; gap: 20px; }
   .track-summary-stats { gap: 20px; }
   .page-head h1 { font-size: 24px; }
+  .watchlist-head { flex-wrap: wrap; gap: 8px 16px; }
+  .watchlist-id { min-width: 0; }
+  .watchlist-quote { min-width: 0; }
+  .watchlist-quote svg { max-width: 60px; height: auto; }
+  .watchlist-count { margin-left: 0; }
 }
 /* Command Palette Styles */
 .cmd-overlay {
