@@ -80,10 +80,21 @@ prefers `full_text` and falls back to `summary_raw` transparently.
 
 ## 3. On-demand analysis (you + Claude)
 
-No second AI API key needed -- when you want a read, tell Claude (in a session with
-access to this repo and the Supabase env vars) something like:
+No second AI API key needed -- when you want a read, open a Claude Code
+session in this repo and type **`/digest`** (a project slash command, see
+`.claude/commands/digest.md`) -- or just tell Claude something like:
 
 > "Pull unprocessed articles from market-intel and give me today's read."
+
+Either way it needs a session with access to this repo and the Supabase env
+vars (already in `analysis/.env` / `scraper/.env` locally).
+
+A fully unattended cloud version of this (a claude.ai routine, triggered
+on-demand with no laptop open) was tried and hit a real platform wall: the
+cloud sandbox's default network egress policy only allows a fixed host
+allowlist (PyPI, npm, Anthropic's own API) and blocks arbitrary outbound
+traffic to Supabase. If claude.ai ever exposes a way to allow a custom host
+for an environment, `/digest`'s prompt is reusable as-is for that routine.
 
 Claude then runs, e.g.:
 ```bash
