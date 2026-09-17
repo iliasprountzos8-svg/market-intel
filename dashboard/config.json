@@ -1,0 +1,89 @@
+{
+  "sources": [
+    {
+      "name": "Business Insider",
+      "url": "https://www.businessinsider.com/rss",
+      "category": "macro",
+      "enabled": true
+    },
+    {
+      "name": "CNBC Markets",
+      "url": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+      "category": "equities",
+      "enabled": true
+    },
+    {
+      "name": "CNBC Top News",
+      "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+      "category": "macro",
+      "enabled": true
+    },
+    {
+      "name": "MarketWatch Top Stories",
+      "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+      "category": "equities",
+      "enabled": true
+    },
+    {
+      "name": "MarketWatch Market Pulse",
+      "url": "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",
+      "category": "equities",
+      "enabled": true
+    },
+    {
+      "name": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/news/rssindex",
+      "category": "equities",
+      "enabled": true
+    },
+    {
+      "name": "Seeking Alpha Market News",
+      "url": "https://seekingalpha.com/market_currents.xml",
+      "category": "equities",
+      "enabled": true
+    },
+    {
+      "name": "Investing.com News",
+      "url": "https://www.investing.com/rss/news.rss",
+      "category": "macro",
+      "enabled": true
+    },
+    {
+      "name": "Federal Reserve Press Releases",
+      "url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "category": "macro",
+      "enabled": true
+    },
+    {
+      "name": "Financial Times Markets",
+      "url": "https://www.ft.com/markets?format=rss",
+      "category": "macro",
+      "enabled": true
+    },
+    {
+      "name": "The Guardian Business",
+      "url": "https://www.theguardian.com/uk/business/rss",
+      "category": "macro",
+      "enabled": true
+    },
+    {
+      "name": "Energy news (OilPrice.com)",
+      "url": "https://oilprice.com/rss/main",
+      "category": "energy",
+      "enabled": true
+    }
+  ],
+  "newsapi_query": "stock market OR Fed OR earnings OR inflation OR Nvidia OR Microsoft OR Google OR ASML OR energy sector",
+  "quotes_symbols": [
+    "NVDA",
+    "MSFT",
+    "GOOGL",
+    "ASML.AS",
+    "CL=F",
+    "BZ=F",
+    "^TNX",
+    "GC=F",
+    "VWCE.DE",
+    "EURUSD=X"
+  ]
+}

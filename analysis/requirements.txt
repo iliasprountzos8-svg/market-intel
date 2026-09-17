@@ -1,0 +1,5 @@
+supabase==2.9.1
+python-dotenv==1.0.1
+yfinance==0.2.44
+vaderSentiment==3.3.2
+pywebpush==2.0.1

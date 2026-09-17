@@ -1,0 +1,28 @@
+services:
+  # Self-sufficient: talks to GitHub Actions (cycle.yml) and Yahoo Finance
+  # directly via its own app/api/* routes -- no separate server needed, so
+  # this is the only container required to run the product locally, and the
+  # only thing deployed for the live version (e.g. on Vercel, which builds
+  # straight from this same dashboard/ directory). The pipeline itself runs
+  # on GitHub Actions' free schedule -- see .github/workflows/cycle.yml.
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      # NEXT_PUBLIC_* vars are inlined at `next build` time -- must be build
+      # args, not `environment:` (which only reaches the already-built
+      # runtime and would silently no-op).
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+    ports:
+      - "3000:3000"
+    environment:
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_KEY}
+      # Used by app/api/pipeline/* to dispatch/poll the cycle.yml workflow --
+      # see dashboard/.env.local.example for how to generate GITHUB_TOKEN.
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_OWNER=${GITHUB_OWNER}
+      - GITHUB_REPO=${GITHUB_REPO}
+    restart: unless-stopped
