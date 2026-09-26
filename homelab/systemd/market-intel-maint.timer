@@ -1,0 +1,8 @@
+[Unit]
+Description=Market intel database maintenance
+[Timer]
+OnCalendar=Sun *-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=120
+[Install]
+WantedBy=timers.target

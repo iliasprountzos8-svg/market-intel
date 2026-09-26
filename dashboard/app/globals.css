@@ -804,3 +804,19 @@ a { color: inherit; }
   padding: 8px 16px;
   background: #0a0a0a;
 }
+
+/* ---------- homelab edition ---------- */
+.hl-note {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  background: var(--accent-dim);
+  padding: 10px 14px;
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.hl-chip { display: inline-block; font-family: var(--font-mono); font-size: 11px; padding: 1px 7px; border: 1px solid var(--border); margin-left: 8px; color: var(--text-muted); }
+.hl-chip.up { color: var(--bull); border-color: var(--bull); }
+.hl-chip.down { color: var(--bear); border-color: var(--bear); }
+.strong { font-weight: 700; }

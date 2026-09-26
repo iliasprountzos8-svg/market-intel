@@ -1,5 +1,7 @@
 # Market Intel
 
+> **Homelab edition (2026-09-26):** the pipeline now runs on a self-hosted homelab with a local database, 1,600+ feeds, local FinBERT scoring and a prediction lab. See [docs/HOMELAB_EDITION.md](docs/HOMELAB_EDITION.md).
+
 A free-tier pipeline: RSS/news scraping &rarr; Postgres (Supabase) &rarr; on-demand
 Claude analysis &rarr; live dashboard.
 

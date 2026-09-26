@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMarketData } from "@/lib/useMarketData";
 import { ArticleRow } from "@/components/ArticleRow";
 import { supabase } from "@/lib/supabase";
 
-const FILTERS = ["all", "bullish", "bearish", "high relevance", "unprocessed"] as const;
+const FILTERS = ["all", "bullish", "bearish", "high relevance", "holdings", "filings"] as const;
+const HOLD_RX = /(nvidia|nvda|microsoft|msft|alphabet|google|asml)/i;
 type Filter = (typeof FILTERS)[number];
 
 export default function NewsPage() {
@@ -14,6 +15,12 @@ export default function NewsPage() {
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // /news?q=Nvidia pre-fills the search (used by the Signals page)
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setQuery(q);
+  }, []);
 
   const sources = useMemo(
     () => ["all", ...Array.from(new Set(articles.map((a) => a.source))).sort()],
@@ -24,8 +31,9 @@ export default function NewsPage() {
     all: articles.length,
     bullish: articles.filter((a) => a.ai_sentiment === "bullish").length,
     bearish: articles.filter((a) => a.ai_sentiment === "bearish").length,
-    "high relevance": articles.filter((a) => (a.ai_relevance_score ?? 0) >= 70).length,
-    unprocessed: articles.filter((a) => !a.ai_processed).length,
+    "high relevance": articles.filter((a) => (a.ai_relevance_score ?? 0) >= 60).length,
+    holdings: articles.filter((a) => HOLD_RX.test(a.title)).length,
+    filings: articles.filter((a) => a.source === "SEC EDGAR").length,
   }), [articles]);
 
   const filtered = useMemo(() => {
@@ -36,8 +44,9 @@ export default function NewsPage() {
       switch (filter) {
         case "bullish": return a.ai_sentiment === "bullish";
         case "bearish": return a.ai_sentiment === "bearish";
-        case "high relevance": return (a.ai_relevance_score ?? 0) >= 70;
-        case "unprocessed": return !a.ai_processed;
+        case "high relevance": return (a.ai_relevance_score ?? 0) >= 60;
+        case "holdings": return HOLD_RX.test(a.title);
+        case "filings": return a.source === "SEC EDGAR";
         default: return true;
       }
     });

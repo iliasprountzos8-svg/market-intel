@@ -31,6 +31,15 @@ load_dotenv()
 log = get_logger("analysis.notify")
 
 PORTFOLIO_TICKERS = {"NVDA", "MSFT", "GOOGL", "ASML"}
+import re as _re
+HOLDING_ALIASES = {"NVDA": _re.compile(r"nvidia|nvda", _re.I), "MSFT": _re.compile(r"microsoft|msft", _re.I),
+                   "GOOGL": _re.compile(r"alphabet|google|googl?", _re.I), "ASML": _re.compile(r"asml", _re.I)}
+MAX_PHONE_ARTICLE_ALERTS_PER_RUN = 3
+
+
+def about_holding(title, tickers):
+    """True only if the headline itself names one of the holdings (per-company feeds tag tangential stories)."""
+    return any(HOLDING_ALIASES[t].search(title or "") for t in tickers if t in HOLDING_ALIASES)
 
 
 def get_client():
@@ -93,6 +102,50 @@ def send_email(to_address: str, subject: str, body: str):
         log.warning(f"Email send failed: {e}")
 
 
+def is_recent(iso_ts, hours: int = 24) -> bool:
+    """True if an ISO timestamp is within the last `hours` (guards against
+    blasting a backlog of old items the first time a channel is enabled)."""
+    if not iso_ts:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - ts).total_seconds() < hours * 3600
+
+
+def send_ntfy(title: str, body: str, click: str = "", priority: int = 3,
+              tags: list | None = None, actions: list | None = None):
+    """Publish to a self-hosted ntfy topic (JSON API, so UTF-8 titles are fine).
+    No-ops unless NTFY_SERVER and NTFY_TOPIC are set."""
+    import json
+    import urllib.request
+
+    server = os.environ.get("NTFY_SERVER")
+    topic = os.environ.get("NTFY_TOPIC")
+    if not server or not topic:
+        return  # ntfy not configured, silently skip
+
+    payload = {"topic": topic, "title": title, "message": body, "priority": priority}
+    if tags:
+        payload["tags"] = tags
+    if click:
+        payload["click"] = click
+    if actions:
+        payload["actions"] = actions
+    try:
+        req = urllib.request.Request(
+            server.rstrip("/"),
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10).read()
+    except Exception as e:
+        log.warning(f"ntfy send failed: {e}")
+
+
 def main():
     client = get_client()
 
@@ -102,8 +155,10 @@ def main():
     email_enabled = settings.get("email_enabled", False)
     notify_email = settings.get("notify_email")
     threshold = settings.get("relevance_threshold", 70)
+    ntfy_enabled = bool(os.environ.get("NTFY_SERVER") and os.environ.get("NTFY_TOPIC"))
+    control_url = os.environ.get("NTFY_CONTROL_URL", "")
 
-    if not push_enabled and not email_enabled:
+    if not push_enabled and not email_enabled and not ntfy_enabled:
         log.info("Notifications disabled in app_settings, nothing to do.")
         return
 
@@ -118,7 +173,7 @@ def main():
     # 1. High-relevance portfolio articles not yet notified
     articles_res = (
         client.table("articles")
-        .select("id,title,ai_relevance_score,ai_affected_tickers,tickers_raw,ai_sentiment")
+        .select("id,title,ai_relevance_score,ai_affected_tickers,tickers_raw,ai_sentiment,published_at,ai_summary")
         .is_("notified_at", "null")
         .eq("ai_processed", True)
         .gte("ai_relevance_score", threshold)
@@ -127,6 +182,7 @@ def main():
         .execute()
     )
     notified_count = 0
+    phone_alerts = 0
     for a in articles_res.data or []:
         tickers = set(a.get("ai_affected_tickers") or a.get("tickers_raw") or [])
         if not (tickers & PORTFOLIO_TICKERS):
@@ -140,6 +196,12 @@ def main():
             send_push(subscriptions, title, body, url, client)
         if email_enabled:
             send_email(notify_email, title, f"{body}\n\n{url}")
+        if (ntfy_enabled and is_recent(a.get("published_at")) and phone_alerts < MAX_PHONE_ARTICLE_ALERTS_PER_RUN
+                and about_holding(a["title"], tickers & PORTFOLIO_TICKERS)
+                and (a.get("ai_summary") or a["ai_relevance_score"] >= 85)):
+            phone_alerts += 1
+            send_ntfy(title, body, click=url, priority=4,
+                      tags=["chart_with_upwards_trend" if a.get("ai_sentiment") == "bullish" else "chart_with_downwards_trend"])
 
         client.table("articles").update({"notified_at": now_iso}).eq("id", a["id"]).execute()
         notified_count += 1
@@ -162,6 +224,14 @@ def main():
             send_push(subscriptions, title, body, url, client)
         if email_enabled:
             send_email(notify_email, title, f"{d.get('summary', '')}\n\n{url}")
+        if ntfy_enabled and is_recent(d.get("created_at")):
+            acts = [{"action": "view", "label": "Open dashboard", "url": dashboard_url}]
+            if control_url:
+                acts.append({"action": "view", "label": "Control panel", "url": control_url})
+                acts.append({"action": "http", "label": "New digest", "clear": True,
+                             "url": control_url.rstrip("/") + "/run/digest", "method": "POST"})
+            send_ntfy("Market Intel digest ready", (d.get("summary") or "")[:900],
+                      click=dashboard_url, priority=3, tags=["newspaper"], actions=acts)
 
         client.table("digests").update({"notified_at": now_iso}).eq("id", d["id"]).execute()
         notified_count += 1

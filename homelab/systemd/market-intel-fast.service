@@ -1,0 +1,9 @@
+[Unit]
+Description=Market Intel fast lane (due feeds, classify, FinBERT) every 5 minutes
+After=network-online.target docker.service
+[Service]
+Type=oneshot
+User=ilias
+ExecStart=/home/ilias/market-intel/run_fast.sh
+TimeoutStartSec=10min
+Nice=10

@@ -19,6 +19,7 @@ sub-scripts' own dotenv calls -- nothing extra needed here):
 Run: python run_cycle.py
 """
 
+import os
 import subprocess
 import sys
 import time
@@ -42,15 +43,28 @@ SCRAPER_DIR = ROOT / "scraper"
 ANALYSIS_DIR = ROOT / "analysis"
 SCRAPER_PY = venv_python(SCRAPER_DIR / ".venv")
 ANALYSIS_PY = venv_python(ANALYSIS_DIR / ".venv")
+INGEST_DIR = ROOT / "ingest"
+INGEST_PY = venv_python(INGEST_DIR / ".venv")
+NLP_DIR = ROOT / "nlp"
+NLP_PY = venv_python(NLP_DIR / ".venv")
 
 STEPS = [
     ("scrape", SCRAPER_DIR, [SCRAPER_PY, "scrape.py"]),
-    ("fetch_fulltext", SCRAPER_DIR, [SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.4"]),
-    ("classify", ANALYSIS_DIR, [ANALYSIS_PY, "cli.py", "bulk-classify", "--rule-based", "--limit", "200"]),
+    ("ingest", INGEST_DIR, [INGEST_PY, "ingest.py"]),
+    ("fetch_fulltext", SCRAPER_DIR, [SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3"]),
+    ("classify", ANALYSIS_DIR, [ANALYSIS_PY, "cli.py", "bulk-classify", "--rule-based", "--limit", "4000"]),
+    ("finbert", NLP_DIR, [NLP_PY, "score_finbert.py", "--max-minutes", "15", "--threads", "4"]),
+    ("populate", ANALYSIS_DIR, [ANALYSIS_PY, "populate_cells.py", "--hours", "72"]),
+    ("signals", ANALYSIS_DIR, [ANALYSIS_PY, "signals.py"]),
     ("correlate", ANALYSIS_DIR, [ANALYSIS_PY, "correlate.py", "--window-hours", "72"]),
     ("check_outcomes", ANALYSIS_DIR, [ANALYSIS_PY, "check_outcomes.py", "--min-age-days", "3", "--move-threshold", "0.5"]),
     ("notify", ANALYSIS_DIR, [ANALYSIS_PY, "notify.py"]),
 ]
+
+# signals.py keeps its own SQLite store and pushes to ntfy: only meaningful on the homelab, so it is
+# opt-in (MI_ENABLE_SIGNALS=1) and skipped on GitHub Actions.
+if os.environ.get("MI_ENABLE_SIGNALS") != "1":
+    STEPS = [st for st in STEPS if st[0] not in ("signals", "ingest", "finbert", "mirror", "populate")]
 
 
 def run_step(name: str, cwd: Path, cmd: list[str]) -> bool:

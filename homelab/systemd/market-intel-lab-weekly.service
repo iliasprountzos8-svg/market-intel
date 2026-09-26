@@ -1,0 +1,10 @@
+[Unit]
+Description=Prediction lab: weekly walk-forward validation
+After=network-online.target docker.service
+OnFailure=notify-fail@market-intel-lab-weekly.service
+[Service]
+Type=oneshot
+User=ilias
+ExecStart=/home/ilias/market-intel/run_lab_weekly.sh
+TimeoutStartSec=3h
+Nice=10

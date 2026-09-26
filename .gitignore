@@ -7,3 +7,14 @@ __pycache__/
 .venv/
 .vercel
 supabase/.temp/
+
+# homelab-edition local artefacts (data, logs, models, environments)
+data/prices.parquet
+data/signals.db*
+data/models/
+logs/
+.env.pre-local
+*.parquet
+nlp/.venv/
+ingest/.venv/
+lab/.venv/

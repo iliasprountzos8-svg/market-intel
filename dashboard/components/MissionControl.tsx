@@ -12,6 +12,14 @@ type JobStatus = {
     interval_minutes: number;
     next_run: string | null;
   };
+  homelab?: {
+    online: boolean;
+    updated_at: string | null;
+    age_seconds: number | null;
+    counts: { total: number; h1: number; h24: number; worthy24: number } | null;
+    finbert: { scored: number; n: number } | null;
+  };
+  commands?: { id: string; kind: string; status: string; result: string | null; finished_at: string | null; requested_at: string }[];
 };
 
 export function MissionControl() {
@@ -19,110 +27,108 @@ export function MissionControl() {
   const [countdown, setCountdown] = useState<string>("--:--");
   const [triggering, setTriggering] = useState(false);
   const [digestBusy, setDigestBusy] = useState(false);
-  const [digestMsg, setDigestMsg] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
 
-  // Poll API for status
+  // Poll API for status (heartbeat from the homelab)
   useEffect(() => {
     const fetchStatus = async () => {
       try {
-        const res = await fetch("/api/pipeline/status");
-        if (res.ok) {
-          const data = await res.json();
-          setStatus(data);
-        }
+        const res = await fetch("/api/pipeline/status", { cache: "no-store" });
+        if (res.ok) setStatus(await res.json());
       } catch (e) {
         console.error("Failed to fetch API status", e);
       }
     };
-    
     fetchStatus();
     const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  // Compute countdown timer
+  // Countdown to the next full cycle
   useEffect(() => {
     if (!status?.schedule?.next_run) return;
-    
     const tick = () => {
-      const nextRunTime = new Date(status.schedule.next_run!).getTime();
-      const now = new Date().getTime();
-      const distance = nextRunTime - now;
-
-      if (distance < 0) {
-        setCountdown("00:00");
-        return;
-      }
-
+      const distance = new Date(status.schedule.next_run!).getTime() - Date.now();
+      if (distance < 0) { setCountdown("00:00"); return; }
       const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
       const seconds = Math.floor((distance % (1000 * 60)) / 1000);
       setCountdown(`${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`);
     };
-
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [status?.schedule?.next_run]);
 
-  const handleSyncNow = async () => {
-    if (status?.pipeline.status === "running") return;
-    setTriggering(true);
-    try {
-      await fetch("/api/pipeline/trigger", { method: "POST" });
-      // The polling will pick up the "running" state in ~3s
-      setTimeout(() => setTriggering(false), 3000);
-    } catch (e) {
-      console.error(e);
-      setTriggering(false);
-    }
-  };
+  // Tell the user what the last command did (for two minutes)
+  const lastDone = status?.commands?.find(
+    (c) => c.finished_at && Date.now() - new Date(c.finished_at).getTime() < 120000 && ["done", "failed", "rejected"].includes(c.status)
+  );
 
-  const handleRequestDigest = async () => {
-    setDigestBusy(true);
-    setDigestMsg(null);
+  const post = async (url: string, busy: (b: boolean) => void, label: string) => {
+    busy(true);
+    setNote(null);
     try {
-      const res = await fetch("/api/digest/request", { method: "POST" });
+      const res = await fetch(url, { method: "POST" });
       const json = await res.json();
-      setDigestMsg(res.ok ? `Push: ${json.push}` : "Request failed");
-    } catch (e) {
-      setDigestMsg("Request failed");
+      setNote(res.ok ? `${label}: ${json.message}` : `${label} failed: ${json.error ?? res.status}`);
+    } catch {
+      setNote(`${label} failed`);
     }
-    setDigestBusy(false);
-    setTimeout(() => setDigestMsg(null), 5000);
+    setTimeout(() => busy(false), 2500);
+    setTimeout(() => setNote(null), 12000);
   };
 
-  const isRunning = status?.pipeline.status === "running" || triggering;
+  const online = status?.homelab?.online ?? false;
+  const isRunning = status?.pipeline.status === "running" || triggering || digestBusy;
+  const hb = status?.homelab?.age_seconds;
+  const hl = status?.homelab;
 
   return (
     <div className="mission-control">
       <div className="mc-scanlines"></div>
-      
+
       <div className="mc-header">
         <h3 className="mc-title">Mission Control</h3>
-        <div className={`mc-indicator ${isRunning ? "running" : "idle"}`} />
+        <div className={`mc-indicator ${isRunning ? "running" : online ? "idle" : ""}`} />
       </div>
 
       <div className="mc-body">
         <div className="mc-row">
-          <span className="mc-label">Status:</span>
-          <span className={`mc-value ${isRunning ? "glow-amber" : "glow-green"}`}>
-            {isRunning ? "PROCESSING PIPELINE..." : "AUTOPILOT ARMED"}
+          <span className="mc-label">Homelab:</span>
+          <span className={`mc-value ${online ? "glow-green" : "glow-amber"}`}>
+            {status == null ? "CONNECTING..." : online ? `ONLINE · heartbeat ${hb != null ? Math.round(hb) : "?"}s ago` : "OFFLINE"}
           </span>
         </div>
-        
+
+        <div className="mc-row">
+          <span className="mc-label">Status:</span>
+          <span className={`mc-value ${isRunning ? "glow-amber" : "glow-green"}`}>
+            {isRunning ? "PROCESSING..." : online ? "AUTOPILOT ARMED" : "STANDBY"}
+          </span>
+        </div>
+
         <div className="mc-row">
           <span className="mc-label">Last Sync:</span>
           <span className="mc-value dim">
             {status?.pipeline.last_run ? new Date(status.pipeline.last_run).toLocaleTimeString() : "Never"}
           </span>
         </div>
-        
+
         <div className="mc-row">
-          <span className="mc-label">Next Sync:</span>
+          <span className="mc-label">Next Cycle:</span>
           <span className="mc-value mono">{countdown}</span>
         </div>
-        
-        {isRunning && status?.pipeline.message && (
+
+        {hl?.counts && (
+          <div className="mc-row">
+            <span className="mc-label">Intake:</span>
+            <span className="mc-value dim">
+              {hl.counts.total.toLocaleString()} articles · +{hl.counts.h1}/h · {hl.counts.worthy24} key today
+            </span>
+          </div>
+        )}
+
+        {status?.pipeline.message && (
           <div className="mc-log">
             {"> "} {status.pipeline.message}
           </div>
@@ -132,24 +138,25 @@ export function MissionControl() {
       <div style={{ display: "flex", gap: 8 }}>
         <button
           className="mc-btn-sync"
-          onClick={handleSyncNow}
-          disabled={isRunning}
+          onClick={() => post("/api/pipeline/trigger", setTriggering, "Sync")}
+          disabled={isRunning || !online}
           style={{ flex: 1 }}
         >
-          {isRunning ? "[ SYNC IN PROGRESS ]" : "[ SYNC NOW ]"}
+          {triggering ? "[ QUEUING... ]" : isRunning ? "[ WORKING ]" : "[ SYNC NOW ]"}
         </button>
         <button
           className="mc-btn-sync"
-          onClick={handleRequestDigest}
-          disabled={digestBusy}
+          onClick={() => post("/api/digest/request", setDigestBusy, "Digest")}
+          disabled={isRunning || !online}
           style={{ flex: 1 }}
         >
-          {digestBusy ? "[ REQUESTING... ]" : "[ REQUEST DIGEST ]"}
+          {digestBusy ? "[ QUEUING... ]" : "[ REQUEST DIGEST ]"}
         </button>
       </div>
-      {digestMsg && (
+      {note && <div className="mc-log" style={{ marginTop: 8 }}>{"> "} {note}</div>}
+      {!note && lastDone && (
         <div className="mc-log" style={{ marginTop: 8 }}>
-          {"> "} {digestMsg}
+          {"> "} {lastDone.kind} {lastDone.status}: {lastDone.result}
         </div>
       )}
     </div>

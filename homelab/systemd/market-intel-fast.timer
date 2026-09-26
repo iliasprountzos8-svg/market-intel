@@ -1,0 +1,8 @@
+[Unit]
+Description=Market Intel fast lane every 5 minutes
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=20
+Persistent=false
+[Install]
+WantedBy=timers.target

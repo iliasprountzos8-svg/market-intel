@@ -1,0 +1,10 @@
+[Unit]
+Description=Market Intel digest (headless Claude)
+After=network-online.target
+OnFailure=notify-fail@market-intel-digest.service
+[Service]
+Type=oneshot
+User=ilias
+WorkingDirectory=/home/ilias/market-intel/analysis
+ExecStart=/home/ilias/market-intel/run_digest.sh
+TimeoutStartSec=25min
