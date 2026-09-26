@@ -21,6 +21,24 @@ GitHub Actions and the Vercel dashboard keep working; the homelab is now the pri
 | Alerts | Web push / email (disabled) | ntfy phone alerts: signal spikes, digests, failures (quality-gated) |
 | Control | dashboard only | + private phone control page (pull, digest, lab, status) |
 
+## The site: fed by the homelab (the Vercel dashboard you already use)
+The homelab is the primary system; the site is its window, on every device. The site can't reach the homelab, so the homelab talks OUTBOUND to Supabase:
+
+```
+homelab pulls 24/7 -> local Postgres -> local AI fills the cells -> sync daemon -> Supabase -> site (realtime) on any device
+                                                     ^                                            |
+                                                     +---- commands queue (Sync / Digest) <-------+ buttons on the site
+```
+* `analysis/populate_cells.py`: AI fills the cells the site reads (`ai_sentiment`, `ai_relevance_score`, `ai_affected_tickers`, `ai_confidence`) plus new `fb_score`, `event`, `lang`,
+  from FinBERT + lexicon + entity matching + event tags + source weights + duplicate clustering. Claude-written rows keep Claude's analysis. Effect: "high relevance" (60+) fell from ~936 to ~55 articles in 3 days, and the top items are the ones that matter.
+* `sync_daemon.py` (`market-intel-sync.service`, 24/7): every 30 s pushes worthy articles (relevance >= 40, naming a holding, or Claude-analysed), digests and calls; every 15 s a heartbeat/status row (`pipeline_status`);
+  every ~2 min S&P 500 sentiment (`ticker_signals`) and the lab report (`lab_report`); every 5 min pulls dashboard-owned settings; every 5 s polls `commands`.
+* Buttons on the site: `Sync Now` -> `commands(kind='sync')` -> `run_sync.sh` (poll key sources, classify, FinBERT, fill cells, ~90 s). `Request Digest` -> `commands(kind='digest')` -> `run_digest.sh` (headless Claude writes a real digest + falsifiable calls). Rate-limited (digest max 8/day), allow-listed kinds only.
+  If the homelab is silent for 3+ minutes, Sync falls back to the old GitHub Actions dispatch.
+* New site pages: **Signals** (S&P 500 sentiment leaderboard), **Lab** (strategies, paper ledger, walk-forward tests), **System** (heartbeat, sources, throughput, commands); FinBERT/event badges on articles; sentiment chips on the Watchlist; Mission Control shows the homelab live.
+* Supabase side: `supabase/migrations/005_homelab.sql` (new columns + `commands`, `pipeline_status`, `ticker_signals`, `lab_report`, RLS, realtime). Until it is applied the daemon logs what is missing and keeps pushing what it can.
+* Tested end to end on a private copy first: Sync (+68 new articles, ~4 min, now trimmed to ~90 s) and Digest (real digest written and pushed) both work from the site's buttons.
+
 ## Market Intel HQ: the live phone app (added 2026-09-26)
 `homelab/hq/` (`hq_app.py` + `index.html`, no build step, no external libraries) is served from the homelab on the Tailscale IP at the
 same secret link as the old control page, and reads the LOCAL database directly through a read-only Postgres role (`hq_ro`).

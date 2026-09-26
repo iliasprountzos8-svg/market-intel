@@ -47,6 +47,13 @@ export function ArticleRow({
             {article.ai_relevance_score}
           </span>
         )}
+        {article.fb_score != null && article.lang !== "el" && (
+          <span className={`tag ${article.fb_score > 0.15 ? "bullish" : article.fb_score < -0.15 ? "bearish" : ""}`} title="FinBERT score, -1 negative to +1 positive">
+            FinBERT {article.fb_score >= 0 ? "+" : ""}{article.fb_score.toFixed(2)}
+          </span>
+        )}
+        {article.event && article.event !== "other" && <span className="tag">{article.event.replace("_", "/")}</span>}
+        {article.lang === "el" && <span className="tag">EL</span>}
         {article.ai_risk_flag && article.ai_risk_flag !== "none" && (
           <span className="tag risk">risk: {article.ai_risk_flag}</span>
         )}

@@ -24,6 +24,10 @@ export type Article = {
   ai_risk_flag: string | null;
   ai_confidence: number | null;
   ai_correlated_article_ids: string[] | null;
+  // filled by the homelab (migration 005)
+  fb_score?: number | null;
+  event?: string | null;
+  lang?: string | null;
 };
 
 export type Digest = {
@@ -46,4 +50,38 @@ export type CallLog = {
   rationale: string | null;
   outcome: string | null;
   outcome_checked_at: string | null;
+  confidence?: number | null;
+  horizon_days?: number | null;
+  symbol?: string | null;
+  invalidation?: string | null;
+  asset_return_pct?: number | null;
+  excess_return_pct?: number | null;
 };
+
+// ---- homelab edition (migration 005) ----
+export type PipelineStatus = { id: number; updated_at: string; data: any };
+export type Command = {
+  id: string;
+  kind: "sync" | "digest";
+  status: "pending" | "running" | "done" | "failed" | "rejected" | "expired";
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  result: string | null;
+};
+export type TickerSignal = {
+  symbol: string;
+  name: string | null;
+  sector: string | null;
+  updated_at: string | null;
+  ens: number | null;
+  ens_z: number | null;
+  finbert: number | null;
+  lex: number | null;
+  old: number | null;
+  stories_24h: number | null;
+  attention_z: number | null;
+  series: [string, number][] | null;
+  perf: { last: number; d1: number; d5: number } | null;
+};
+export type LabReport = { as_of: string; updated_at: string; report: any };

@@ -54,17 +54,17 @@ STEPS = [
     ("fetch_fulltext", SCRAPER_DIR, [SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3"]),
     ("classify", ANALYSIS_DIR, [ANALYSIS_PY, "cli.py", "bulk-classify", "--rule-based", "--limit", "4000"]),
     ("finbert", NLP_DIR, [NLP_PY, "score_finbert.py", "--max-minutes", "15", "--threads", "4"]),
+    ("populate", ANALYSIS_DIR, [ANALYSIS_PY, "populate_cells.py", "--hours", "72"]),
     ("signals", ANALYSIS_DIR, [ANALYSIS_PY, "signals.py"]),
     ("correlate", ANALYSIS_DIR, [ANALYSIS_PY, "correlate.py", "--window-hours", "72"]),
     ("check_outcomes", ANALYSIS_DIR, [ANALYSIS_PY, "check_outcomes.py", "--min-age-days", "3", "--move-threshold", "0.5"]),
     ("notify", ANALYSIS_DIR, [ANALYSIS_PY, "notify.py"]),
-    ("mirror", ROOT, [ANALYSIS_PY, str(ROOT / "mirror_to_supabase.py")]),
 ]
 
 # signals.py keeps its own SQLite store and pushes to ntfy: only meaningful on the homelab, so it is
 # opt-in (MI_ENABLE_SIGNALS=1) and skipped on GitHub Actions.
 if os.environ.get("MI_ENABLE_SIGNALS") != "1":
-    STEPS = [st for st in STEPS if st[0] not in ("signals", "ingest", "finbert", "mirror")]
+    STEPS = [st for st in STEPS if st[0] not in ("signals", "ingest", "finbert", "mirror", "populate")]
 
 
 def run_step(name: str, cwd: Path, cmd: list[str]) -> bool:

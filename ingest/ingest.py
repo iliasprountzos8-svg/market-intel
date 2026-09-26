@@ -134,6 +134,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--max-minutes", type=float, default=12)
     ap.add_argument("--workers", type=int, default=24)
+    ap.add_argument("--force", action="store_true", help="poll every enabled source now (used by Sync Now)")
+    ap.add_argument("--max-poll", type=int, default=0, help="with --force: only sources normally polled at least this often (minutes)")
     args = ap.parse_args()
     t0 = time.time()
     client = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
@@ -154,6 +156,8 @@ def main():
         lf = s.get("last_fetch")
         if not lf or (now - datetime.fromisoformat(lf.replace("Z", "+00:00"))).total_seconds() >= s["poll_minutes"] * 60 * 0.9:
             due.append(s)
+    if args.force:
+        due = [x for x in srcs if not args.max_poll or x["poll_minutes"] <= args.max_poll]
     due.sort(key=lambda s: (s.get("last_fetch") or ""))  # stalest first
     if args.limit:
         due = due[:args.limit]

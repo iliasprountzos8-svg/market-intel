@@ -1,68 +1,64 @@
 import { NextResponse } from "next/server";
+import { serverSupabase, HOMELAB_ONLINE_SECONDS } from "@/lib/serverSupabase";
 
-// Replaces the FastAPI's /api/v1/jobs/status: reports the latest run of the
-// cycle.yml GitHub Actions workflow (the actual, free, always-on scheduler --
-// see .github/workflows/cycle.yml) instead of a Python-side APScheduler that
-// would need a 24/7 host to exist.
-
+// Status now comes from the homelab's own heartbeat (pipeline_status) and the commands queue.
 export const dynamic = "force-dynamic";
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_OWNER = process.env.GITHUB_OWNER;
-const GITHUB_REPO = process.env.GITHUB_REPO;
-const WORKFLOW_FILE = "cycle.yml";
-const INTERVAL_MINUTES = 30;
+function lastFinished(...texts: (string | undefined)[]): string | null {
+  let best: string | null = null;
+  for (const t of texts) {
+    const m = /finished (\S+)/.exec(t ?? "");
+    if (m && (!best || m[1] > best)) best = m[1];
+  }
+  return best;
+}
+
+function nextCycle(): string {
+  // the full cycle runs at :07 and :37 past each hour
+  const now = new Date();
+  const next = new Date(now);
+  next.setSeconds(0, 0);
+  const m = now.getMinutes();
+  if (m < 7) next.setMinutes(7);
+  else if (m < 37) next.setMinutes(37);
+  else { next.setHours(next.getHours() + 1); next.setMinutes(7); }
+  return next.toISOString();
+}
 
 export async function GET() {
-  if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
-    return NextResponse.json(
-      { error: "GITHUB_TOKEN / GITHUB_OWNER / GITHUB_REPO not configured" },
-      { status: 500 }
-    );
-  }
-
+  const db = serverSupabase();
   try {
-    const res = await fetch(
-      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${WORKFLOW_FILE}/runs?per_page=1`,
-      {
-        headers: {
-          Authorization: `Bearer ${GITHUB_TOKEN}`,
-          Accept: "application/vnd.github+json",
-        },
-        cache: "no-store",
-      }
-    );
-    if (!res.ok) {
-      return NextResponse.json({ error: `GitHub API error ${res.status}` }, { status: 502 });
-    }
-    const json = await res.json();
-    const run = json?.workflow_runs?.[0];
+    const [{ data: ps }, { data: cmds }] = await Promise.all([
+      db.from("pipeline_status").select("*").eq("id", 1).maybeSingle(),
+      db.from("commands").select("*").order("requested_at", { ascending: false }).limit(6),
+    ]);
+    const d = ps?.data ?? null;
+    const ageSec = ps ? (Date.now() - new Date(ps.updated_at).getTime()) / 1000 : null;
+    const online = ageSec !== null && ageSec < HOMELAB_ONLINE_SECONDS;
+    const activeCmd = (cmds ?? []).find((c: any) => c.status === "pending" || c.status === "running");
+    const busy = !!activeCmd || !!d?.cycle?.running || !!d?.fast?.running || !!d?.digest?.running;
+
+    let message = "Homelab idle";
+    if (!ps) message = "Waiting for the first homelab heartbeat (apply migration 005)";
+    else if (!online) message = "Homelab offline (no heartbeat for " + Math.round((ageSec ?? 0) / 60) + " min)";
+    else if (activeCmd?.kind === "digest") message = activeCmd.status === "pending" ? "Digest queued..." : "Claude is writing the digest on the homelab...";
+    else if (activeCmd?.kind === "sync") message = activeCmd.status === "pending" ? "Sync queued..." : "Polling every source, scoring and filling AI fields...";
+    else if (d?.cycle?.running) message = "Full 30-minute cycle running on the homelab...";
+    else if (d?.fast?.running) message = "Fast lane running...";
+    else message = d?.sync?.text || d?.fast?.text || d?.cycle?.text || message;
 
     let status: "idle" | "running" | "success" | "failed" = "idle";
-    if (run) {
-      if (run.status === "in_progress" || run.status === "queued") status = "running";
-      else if (run.conclusion === "success") status = "success";
-      else if (run.conclusion) status = "failed";
-    }
-
-    // cron runs land on the interval boundary; approximate the next one from
-    // the wall clock rather than parsing the cron expression.
-    const now = new Date();
-    const next = new Date(now);
-    next.setMinutes(Math.ceil((now.getMinutes() + 1) / INTERVAL_MINUTES) * INTERVAL_MINUTES, 0, 0);
+    if (busy) status = "running";
+    else if (online) status = "success";
+    else if (ps) status = "failed";
 
     return NextResponse.json({
-      pipeline: {
-        status,
-        last_run: run?.updated_at ?? null,
-        message: run ? `Last run: ${run.status}${run.conclusion ? ` (${run.conclusion})` : ""}` : "No runs yet",
-      },
-      schedule: {
-        interval_minutes: INTERVAL_MINUTES,
-        next_run: next.toISOString(),
-      },
+      pipeline: { status, last_run: lastFinished(d?.cycle?.text, d?.fast?.text) ?? ps?.updated_at ?? null, message },
+      schedule: { interval_minutes: 30, next_run: nextCycle() },
+      homelab: { online, updated_at: ps?.updated_at ?? null, age_seconds: ageSec, counts: d?.counts ?? null, finbert: d?.finbert ?? null },
+      commands: cmds ?? [],
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Failed to reach GitHub" }, { status: 500 });
+    return NextResponse.json({ error: e.message ?? "Failed to read status" }, { status: 500 });
   }
 }

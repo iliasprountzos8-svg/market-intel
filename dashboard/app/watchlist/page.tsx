@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMarketData } from "@/lib/useMarketData";
 import { useQuotes } from "@/lib/useQuotes";
+import { useTickerSignals } from "@/lib/useHomelab";
 import { Sparkline } from "@/components/TickerBar";
 import { ArticleRow } from "@/components/ArticleRow";
 import { Article } from "@/lib/supabase";
@@ -23,6 +24,7 @@ function matchesTicker(article: Article, keywords: string[]): boolean {
 export default function WatchlistPage() {
   const { articles, loading } = useMarketData();
   const { quotes } = useQuotes();
+  const { rows: signalRows } = useTickerSignals();
   const [open, setOpen] = useState<string | null>("NVDA");
 
   const grouped = useMemo(() => {
@@ -59,6 +61,14 @@ export default function WatchlistPage() {
                   <Sparkline points={w.quote.spark} up={up} width={90} height={26} />
                 </div>
               ) : <span className="dim">loading quote&hellip;</span>}
+              {(() => {
+                const sg = signalRows.find((r) => r.symbol === w.symbol.split(".")[0]);
+                return sg && sg.ens != null ? (
+                  <span className={`hl-chip ${sg.ens > 0.1 ? "up" : sg.ens < -0.1 ? "down" : ""}`} title="AI news-sentiment index vs its own norm">
+                    news {sg.ens >= 0 ? "+" : ""}{sg.ens.toFixed(2)} · z {sg.ens_z == null ? "n/a" : sg.ens_z.toFixed(1)}
+                  </span>
+                ) : null;
+              })()}
               <span className="watchlist-count">{w.matches.length} articles</span>
               <svg className={`chevron ${isOpen ? "open" : ""}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
             </button>

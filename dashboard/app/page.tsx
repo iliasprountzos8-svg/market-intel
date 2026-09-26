@@ -7,6 +7,7 @@ import { HitRateRing } from "@/components/TrackRecord";
 import { ArticleRow } from "@/components/ArticleRow";
 import { MissionControl } from "@/components/MissionControl";
 import { SectorHeatmap } from "@/components/SectorHeatmap";
+import { SignalsCard } from "@/components/SignalsCard";
 
 export default function Overview() {
   const { articles, digest, calls, loading } = useMarketData();
@@ -121,6 +122,8 @@ export default function Overview() {
               {whatsNews.length === 0 && <li className="dim">Nothing high-relevance yet.</li>}
             </ul>
           </div>
+
+          <SignalsCard />
 
           <div className="stat-card">
             <div className="card-head"><h2>Track Record</h2></div>
