@@ -36,7 +36,8 @@ export async function GET() {
     const ageSec = ps ? (Date.now() - new Date(ps.updated_at).getTime()) / 1000 : null;
     const online = ageSec !== null && ageSec < HOMELAB_ONLINE_SECONDS;
     const activeCmd = (cmds ?? []).find((c: any) => c.status === "pending" || c.status === "running");
-    const busy = !!activeCmd || !!d?.cycle?.running || !!d?.fast?.running || !!d?.digest?.running;
+    // the 5-minute fast lane runs in the background and must not disable the buttons
+    const busy = !!activeCmd || !!d?.cycle?.running || !!d?.digest?.running;
 
     let message = "Homelab idle";
     if (!ps) message = "Waiting for the first homelab heartbeat (apply migration 005)";
@@ -44,7 +45,7 @@ export async function GET() {
     else if (activeCmd?.kind === "digest") message = activeCmd.status === "pending" ? "Digest queued..." : "Claude is writing the digest on the homelab...";
     else if (activeCmd?.kind === "sync") message = activeCmd.status === "pending" ? "Sync queued..." : "Polling every source, scoring and filling AI fields...";
     else if (d?.cycle?.running) message = "Full 30-minute cycle running on the homelab...";
-    else if (d?.fast?.running) message = "Fast lane running...";
+    else if (d?.fast?.running) message = "Live refresh running in the background...";
     else message = d?.sync?.text || d?.fast?.text || d?.cycle?.text || message;
 
     let status: "idle" | "running" | "success" | "failed" = "idle";
