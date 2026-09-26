@@ -1,0 +1,161 @@
+{
+  "_note": "Every number marked ASSUMED is a starting guess. Replace with real sold prices from your own sales and comps. comps_updated is used to warn when data is stale.",
+  "rules": {
+    "min_profit_eur": 20,
+    "min_roi": 0.25,
+    "max_gap_normal": 0.3,
+    "max_gap_stale_listing": 0.45,
+    "opening_offer_ratio": 0.85,
+    "too_good_ratio": 0.5,
+    "comps_stale_days": 30,
+    "comps_min_n": 3,
+    "recovery_on_failure": 0.2,
+    "ask_to_sold": 0.88,
+    "remote_extra_cost": 5.0
+  },
+  "fail_probability": {
+    "_note": "ASSUMED chance a private electronics purchase turns out locked, stolen, dead or a no-show scam. Lower when the seller proves it works; higher when you cannot inspect it before paying (shipped).",
+    "no_proof": 0.05,
+    "proof": 0.02,
+    "remote": 0.1
+  },
+  "channels": {
+    "_note": "fee_pct and shipping are ASSUMED; check current platform fees before relying on them.",
+    "fb_local": {
+      "fee_pct": 0.0,
+      "shipping": 0.0
+    },
+    "vinted": {
+      "fee_pct": 0.0,
+      "shipping": 3.0
+    },
+    "ebay": {
+      "fee_pct": 0.13,
+      "shipping": 5.0
+    }
+  },
+  "condition_factor": {
+    "_note": "Relative to the comps median, which is a typical good-condition sale. ASSUMED.",
+    "mint": 1.05,
+    "good": 1.0,
+    "fair": 0.85,
+    "parts": 0.4
+  },
+  "default_must_check": [
+    "Activation Lock off (seller unpairs it in front of you)",
+    "Settings > General > About screenshot (model, GPS vs Cellular)",
+    "Battery Health screenshot",
+    "Close-up photos of screen and case edges",
+    "Band size and whether the band is genuine Apple",
+    "Cash on handover, public place, no prepayment"
+  ],
+  "models": {
+    "apple_watch_se1_44": {
+      "label": "Apple Watch SE 1st gen 44mm (2020)",
+      "manual": true,
+      "resale_median": 82,
+      "resale_low": 70,
+      "resale_high": 95,
+      "comps_n": 2,
+      "comps_updated": "2026-09-26",
+      "comps_source": "ASSUMED: Swappa best price 73 USD (Aug 2026), UpTrade refurb from 120 USD; Greek sold prices NOT yet collected | 2026-09-26: 2 Thessaloniki asking prices seen (median 130), estimate kept manually | 2026-09-26: 1 Thessaloniki asking prices seen (median 100), estimate kept manually | 2026-09-26: 2 Thessaloniki asking prices seen (median 130), estimate kept manually | 2026-09-26: 2 Thessaloniki asking prices seen (median 130), estimate kept manually",
+      "must_check": [
+        "Activation Lock off (seller unpairs it in front of you)",
+        "Settings > General > About screenshot (model, GPS vs Cellular)",
+        "Battery Health screenshot",
+        "Close-up photos of screen and case edges",
+        "Band size and whether the band is genuine Apple",
+        "Cash on handover, public place, no prepayment"
+      ]
+    },
+    "apple_watch_se2": {
+      "label": "Apple Watch SE 2nd gen (40/44mm)",
+      "must_check": [
+        "Activation Lock off (seller unpairs it in front of you)",
+        "Settings > General > About screenshot (model, GPS vs Cellular)",
+        "Battery Health screenshot",
+        "Close-up photos of screen and case edges",
+        "Band size and whether the band is genuine Apple",
+        "Cash on handover, public place, no prepayment"
+      ],
+      "resale_median": 123,
+      "resale_low": 106,
+      "resale_high": 141,
+      "comps_n": 11,
+      "comps_updated": "2026-09-26",
+      "comps_source": "ASSUMED: 11 Facebook Marketplace Thessaloniki ASKING prices on 2026-09-26, median 140 x 0.88; no sold prices yet"
+    },
+    "apple_watch_s6": {
+      "label": "Apple Watch Series 6 (40/44mm)",
+      "must_check": [
+        "Activation Lock off (seller unpairs it in front of you)",
+        "Settings > General > About screenshot (model, GPS vs Cellular)",
+        "Battery Health screenshot",
+        "Close-up photos of screen and case edges",
+        "Band size and whether the band is genuine Apple",
+        "Cash on handover, public place, no prepayment"
+      ],
+      "resale_median": 88,
+      "resale_low": 70,
+      "resale_high": 106,
+      "comps_n": 4,
+      "comps_updated": "2026-09-26",
+      "comps_source": "ASSUMED: 4 Facebook Marketplace Thessaloniki ASKING prices on 2026-09-26, median 100 x 0.88; no sold prices yet"
+    },
+    "apple_watch_s7": {
+      "label": "Apple Watch Series 7 (41/45mm)",
+      "must_check": [
+        "Activation Lock off (seller unpairs it in front of you)",
+        "Settings > General > About screenshot (model, GPS vs Cellular)",
+        "Battery Health screenshot",
+        "Close-up photos of screen and case edges",
+        "Band size and whether the band is genuine Apple",
+        "Cash on handover, public place, no prepayment"
+      ],
+      "resale_median": 106,
+      "resale_low": 88,
+      "resale_high": 123,
+      "comps_n": 6,
+      "comps_updated": "2026-09-26",
+      "comps_source": "ASSUMED: 6 Facebook Marketplace Thessaloniki ASKING prices on 2026-09-26, median 120 x 0.88; no sold prices yet"
+    },
+    "apple_watch_s8": {
+      "label": "Apple Watch Series 8 (41/45mm)",
+      "must_check": [
+        "Activation Lock off (seller unpairs it in front of you)",
+        "Settings > General > About screenshot (model, GPS vs Cellular)",
+        "Battery Health screenshot",
+        "Close-up photos of screen and case edges",
+        "Band size and whether the band is genuine Apple",
+        "Cash on handover, public place, no prepayment"
+      ],
+      "resale_median": 141,
+      "resale_low": 132,
+      "resale_high": 150,
+      "comps_n": 6,
+      "comps_updated": "2026-09-26",
+      "comps_source": "ASSUMED: 6 Facebook Marketplace Thessaloniki ASKING prices on 2026-09-26, median 160 x 0.88; no sold prices yet"
+    }
+  },
+  "battery_factor": {
+    "_note": "ASSUMED resale multiplier by battery health %, applied on top of condition. First row whose min is <= health wins. Replace with real data once you see how buyers react.",
+    "steps": [
+      [
+        90,
+        1.0
+      ],
+      [
+        85,
+        0.95
+      ],
+      [
+        80,
+        0.88
+      ],
+      [
+        0,
+        0.78
+      ]
+    ]
+  }
+}

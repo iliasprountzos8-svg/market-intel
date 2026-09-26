@@ -18,3 +18,7 @@ logs/
 nlp/.venv/
 ingest/.venv/
 lab/.venv/
+
+# Deal Radar: scraped marketplace listings are data, not code (personal/third-party data, repo is public)
+deal-radar/listings_*.csv
+deal-radar/*.xlsx
