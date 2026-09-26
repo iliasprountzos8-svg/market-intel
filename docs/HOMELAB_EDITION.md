@@ -128,3 +128,9 @@ The rules scored 86% on the set they were tuned on and 45% on a fresh blind set:
 
 ### Reboot failure found later the same night (correction)
 The earlier note above says a second reboot verified "11/11 containers up". That check looked at container STATUS only. After that reboot five containers were "Up" with no network attachment and no published ports (ntfy, Nextcloud, Uptime Kuma, Homepage, Syncthing unreachable; `docker restart` did not help, recreating did). Fix: `homelab/bin/homelab-docker-heal.sh` recreates any container whose configured ports or network are missing, at boot (after docker + tailscaled) and every 10 minutes from the watchdog; Uptime Kuma is now a compose project so it can be healed; the watchdog now logs undeliverable alerts (`unsent.log`) instead of dropping them and alerts when ntfy itself is down. The heal was proven by detaching ntfy's network on purpose. The root cause of the lost attachment at boot is NOT identified; a third reboot test with port checks is still owed.
+
+### Cost policy (2026-09-27): the system costs nothing to run
+Only electricity (a few euros a month at most) is spent. There is no API key anywhere on the server: Claude is reached through the claude.ai login, so nothing is billed per token, but anything that calls it draws on the subscription's usage allowance, so it is opt-in:
+* LLM reader: **OFF** (timer disabled; `MI_READER=1` needed to run). Everything else in the news pipeline (stories, SEC 8-K, rules, FinBERT, briefing, metrics) is free and local.
+* Daily health report: rule-based (`homelab/agents/health_summary.py`, tested); no Claude.
+* Only remaining Claude use: the on-demand digest (Request Digest button / phone page, at most 8 a day) and the idle iPhone remote-control session, both user-triggered.

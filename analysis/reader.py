@@ -8,7 +8,7 @@ relevance and a one-line takeaway. Results go to story_reads. Batching matters: 
     python reader.py                     # read the next batch of top unread stories (respects the daily cap)
     python reader.py --dry-run           # show what would be read and the prompt size, no model call
     python reader.py --eval-set 2        # read the gold sample (title+summary only) for evaluation
-Controls: MI_READER=0 disables; MI_READER_DAILY_MAX (default 60 stories/day); MI_READER_MODEL (default haiku).
+Controls: OFF unless MI_READER=1 (it uses Claude usage); MI_READER_DAILY_MAX (default 60 stories/day); MI_READER_MODEL (default haiku).
 """
 import argparse
 import json
@@ -158,8 +158,8 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--eval-set", type=int, default=0)
     a = ap.parse_args(argv)
-    if os.environ.get("MI_READER", "1") == "0":
-        print("reader disabled (MI_READER=0)"); return 0
+    if os.environ.get("MI_READER", "0") != "1":
+        print("reader is OFF by default: it uses Claude subscription usage. Enable deliberately with MI_READER=1."); return 0
     model = os.environ.get("MI_READER_MODEL", "haiku")
     if a.eval_set:
         eval_set(a.eval_set, model); return 0
