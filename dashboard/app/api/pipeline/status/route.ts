@@ -57,6 +57,7 @@ export async function GET() {
       pipeline: { status, last_run: lastFinished(d?.cycle?.text, d?.fast?.text) ?? ps?.updated_at ?? null, message },
       schedule: { interval_minutes: 30, next_run: nextCycle() },
       homelab: { online, updated_at: ps?.updated_at ?? null, age_seconds: ageSec, counts: d?.counts ?? null, finbert: d?.finbert ?? null },
+      command_busy: !!activeCmd,
       commands: cmds ?? [],
     });
   } catch (e: any) {

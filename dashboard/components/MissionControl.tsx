@@ -19,6 +19,7 @@ type JobStatus = {
     counts: { total: number; h1: number; h24: number; worthy24: number } | null;
     finbert: { scored: number; n: number } | null;
   };
+  command_busy?: boolean;
   commands?: { id: string; kind: string; status: string; result: string | null; finished_at: string | null; requested_at: string }[];
 };
 
@@ -80,6 +81,8 @@ export function MissionControl() {
 
   const online = status?.homelab?.online ?? false;
   const isRunning = status?.pipeline.status === "running" || triggering || digestBusy;
+  // buttons are disabled only while one of OUR commands is queued/running; the background cycle must not block them
+  const cmdBusy = !!status?.command_busy || triggering || digestBusy;
   const hb = status?.homelab?.age_seconds;
   const hl = status?.homelab;
 
@@ -139,15 +142,15 @@ export function MissionControl() {
         <button
           className="mc-btn-sync"
           onClick={() => post("/api/pipeline/trigger", setTriggering, "Sync")}
-          disabled={isRunning || !online}
+          disabled={cmdBusy || !online}
           style={{ flex: 1 }}
         >
-          {triggering ? "[ QUEUING... ]" : isRunning ? "[ WORKING ]" : "[ SYNC NOW ]"}
+          {triggering ? "[ QUEUING... ]" : cmdBusy ? "[ WORKING ]" : "[ SYNC NOW ]"}
         </button>
         <button
           className="mc-btn-sync"
           onClick={() => post("/api/digest/request", setDigestBusy, "Digest")}
-          disabled={isRunning || !online}
+          disabled={cmdBusy || !online}
           style={{ flex: 1 }}
         >
           {digestBusy ? "[ QUEUING... ]" : "[ REQUEST DIGEST ]"}
