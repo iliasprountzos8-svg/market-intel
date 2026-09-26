@@ -104,3 +104,27 @@ Files: `homelab/bin/`, `homelab/systemd/` (+ `dropins/`), `homelab/system-tuning
 * **Lesson**: never edit a running bash script in place (bash reads by byte offset); write a temp file and `mv`. `systemctl is-active` is non-zero while a unit is "activating".
 * **signals 252 s -> 16 s**: profiling showed 91% of the step in `zscore()`, which ran ~1,800 SQLite lookups filtered by symbol and model against a table keyed by timestamp first, so each one scanned the whole 564k-row table. Added index `snapshots2(symbol, model, ts)` (created in `db()`); 400 old-plan vs new-plan queries returned identical data, the query itself got 135x faster, and the full cycle drops from about 7.7 to about 3.5 minutes.
 * **Reboot test found a real bug**: after a reboot only 6 of 11 containers came back. The five that publish ports on the Tailscale address (ntfy, Nextcloud, Uptime Kuma, Homepage, Syncthing) failed with "cannot assign requested address" because Docker started before `tailscale0` had its IP, so after any power cut alerts (ntfy) would have stayed down. Fix: `homelab/systemd/dropins/docker.service.d/10-wait-tailscale.conf` (Docker starts after tailscaled and waits up to 90 s for the address). Re-tested with a second reboot: 11/11 containers up, no bind failures, SSH back in about 65 s, boot 18 s.
+
+## News reading v2 (2026-09-27)
+Goal: read the news better, not just score headlines. All of it runs on the homelab; the reader is the only part that uses Claude.
+
+* **Stories, not articles** (`analysis/story_logic.py`, `stories.py`, table `stories`): near-duplicate articles are clustered with rarity-weighted title similarity, an entity veto (headlines naming different companies never merge) and a ticker gate. A purity sample of 18 merged stories found 17 clean. First version merged templated headlines from different companies (RTX/McKesson/Starbucks "is attracting investor attention"): caught by inspection, fixed, regression-tested.
+* **Freshness gate**: an item first seen more than 24 h after its publish time is flagged `is_backfill` and crushed in priority. 75% of the database is one-off backlog import.
+* **Priority** (0-100) decides what gets scarce resources (full-text fetch order, LLM reading): holdings, event weight, primary sources, independent confirmation (per-ticker distributor feeds re-serving one article count once), opinion/clickbait discounted, market-wide roundups discounted.
+* **Primary sources** (`ingest/sec8k.py`): SEC EDGAR submissions API for all 503 S&P 500 companies + ASML every cycle (about 60 s, polite, 0 errors): 8-K items decoded (2.02 earnings, 5.02 executive change, 3.01 delisting, 4.02 restatement ...).
+* **Event tags v2** (`analysis/event_rules.py`, title only, word-start guarded) as the cheap first pass.
+* **LLM reader** (`analysis/reader.py`, timer every 2 h, max 60 stories/day, kill switch `MI_READER=0`): batches of up to 20 top stories to a small Claude model: event, company, direction, magnitude, relevance, one-line takeaway; results in `story_reads`. Real cost measured: about $0.003 per story at list price.
+* **Briefing** (`analysis/briefing.py`, 07:40 daily to the phone): per holding, matched by keyword, reader-identified company or a feed tag on at most 2 tickers (feed tags alone were noisy), with primary-source filings and thesis watch-items (`analysis/theses.json`: DRAFT theses, edit them).
+* **Metrics**: `analysis/dq_metrics.py` hourly into `dq_metrics`, shown on the HQ System tab together with the day's top stories.
+* **Calibration scorecard** (`analysis/calibration.py`): Brier score and reliability bins for the digest's calls. Currently 0 scoreable calls: every historical call lacks a confidence value.
+
+### Measured (gold set: 132 + 71 items labeled by an LLM, so not ground truth)
+| | Accuracy | Precision when it tags | Recall of real events |
+|---|---|---|---|
+| Old classifier (blind set) | 20% | 31% | 16% |
+| Rules v2 (blind set) | 45% | 71% | 28% |
+| LLM reader (blind set) | 65% | 63% | 75% |
+The rules scored 86% on the set they were tuned on and 45% on a fresh blind set: overfitting, disclosed. FinBERT direction was right on 83% (set 1) and 100% (set 2, n=19) of directional items. Reader company match 35/38, direction sign-correct 21/21 when it took a side. The reader's agreement with LLM labels is likely inflated versus human labels.
+
+### Reboot failure found later the same night (correction)
+The earlier note above says a second reboot verified "11/11 containers up". That check looked at container STATUS only. After that reboot five containers were "Up" with no network attachment and no published ports (ntfy, Nextcloud, Uptime Kuma, Homepage, Syncthing unreachable; `docker restart` did not help, recreating did). Fix: `homelab/bin/homelab-docker-heal.sh` recreates any container whose configured ports or network are missing, at boot (after docker + tailscaled) and every 10 minutes from the watchdog; Uptime Kuma is now a compose project so it can be healed; the watchdog now logs undeliverable alerts (`unsent.log`) instead of dropping them and alerts when ntfy itself is down. The heal was proven by detaching ntfy's network on purpose. The root cause of the lost attachment at boot is NOT identified; a third reboot test with port checks is still owed.

@@ -1,0 +1,14 @@
+[Unit]
+Description=Recreate containers that came up without ports or network (found after a reboot on 2026-09-27)
+After=docker.service tailscaled.service network-online.target
+Wants=docker.service tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 40
+ExecStart=/usr/local/bin/homelab-docker-heal.sh
+TimeoutStartSec=10min
+SuccessExitStatus=2
+
+[Install]
+WantedBy=multi-user.target

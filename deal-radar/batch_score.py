@@ -18,6 +18,7 @@ def main(argv=None):
     ap.add_argument("--condition", default="good")
     ap.add_argument("--channel", default="fb_local")
     ap.add_argument("--all", action="store_true", help="also show PASS rows")
+    ap.add_argument("--battery", type=float, default=None, help="assume this battery health for every listing (stress test)")
     ap.add_argument("--remote", action="store_true", help="score the REMOTE listings (shipping, higher risk) instead of the local ones")
     a = ap.parse_args(argv)
     cfg = score.load_config()
@@ -28,7 +29,7 @@ def main(argv=None):
             continue
         if comps.is_remote(r) != a.remote:
             continue
-        res = score.score(cfg, key, float(r["ask"]), a.condition, a.channel, proof=False, price_cut=bool(r["was"]), remote=a.remote)
+        res = score.score(cfg, key, float(r["ask"]), a.condition, a.channel, proof=False, price_cut=bool(r["was"]), remote=a.remote, battery=a.battery)
         rows.append((r, res))
     rows.sort(key=lambda x: -x[1]["profit_at_ask"])
     print(f"{'id':>3} {'model':<34} {'mm':>3} {'ask':>4} {'was':>4}  {'verdict':<10} {'ceiling':>7} {'offer':>5} {'profit@ask':>10}  flags")
