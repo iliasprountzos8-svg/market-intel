@@ -1,0 +1,10 @@
+[Unit]
+Description=Market intel database maintenance
+After=network-online.target docker.service
+OnFailure=notify-fail@market-intel-maint.service
+[Service]
+Type=oneshot
+User=ilias
+ExecStart=/home/ilias/market-intel/run_maintenance.sh
+TimeoutStartSec=3h
+Nice=10

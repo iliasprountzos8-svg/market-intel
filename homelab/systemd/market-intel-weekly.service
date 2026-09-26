@@ -1,0 +1,8 @@
+[Unit]
+Description=Market Intel weekly track record and signal evaluation
+After=network-online.target
+OnFailure=notify-fail@market-intel-weekly.service
+[Service]
+Type=oneshot
+User=ilias
+ExecStart=/home/ilias/market-intel/run_weekly_report.sh

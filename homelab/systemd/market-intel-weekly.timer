@@ -1,0 +1,7 @@
+[Unit]
+Description=Weekly Market Intel accountability report
+[Timer]
+OnCalendar=Sun 09:30
+Persistent=true
+[Install]
+WantedBy=timers.target

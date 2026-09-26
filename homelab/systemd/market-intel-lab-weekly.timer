@@ -1,0 +1,8 @@
+[Unit]
+Description=Prediction lab: weekly walk-forward validation
+[Timer]
+OnCalendar=Sat *-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=120
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Run Market Intel cycle every 30 minutes
+[Timer]
+OnBootSec=3min
+OnCalendar=*:07,37
+Persistent=true
+RandomizedDelaySec=60
+[Install]
+WantedBy=timers.target
