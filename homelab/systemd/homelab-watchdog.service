@@ -1,0 +1,9 @@
+[Unit]
+Description=Homelab watchdog (dead-man checks, SSD wear log, cycle timings)
+After=docker.service
+
+[Service]
+Type=oneshot
+User=ilias
+ExecStart=/usr/local/bin/homelab-watchdog.sh check
+Nice=10

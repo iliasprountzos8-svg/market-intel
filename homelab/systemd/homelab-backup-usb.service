@@ -1,0 +1,11 @@
+[Unit]
+Description=Second backup copy to USB (restic copy)
+After=homelab-backup.service
+OnFailure=notify-fail@homelab-backup-usb.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/homelab-backup-usb.sh
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=idle

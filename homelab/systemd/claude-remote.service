@@ -1,0 +1,17 @@
+[Unit]
+Description=Claude Code remote-control session in tmux (survives reboots)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=ilias
+WorkingDirectory=/home/ilias/homelab-admin
+Environment=PATH=/home/ilias/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/tmux -L rc new-session -d -s rc -c /home/ilias/homelab-admin "claude remote-control --name homelab"
+ExecStop=/usr/bin/tmux -L rc kill-server
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

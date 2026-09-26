@@ -1,0 +1,9 @@
+[Unit]
+Description=Sundays 10:30, paper ledger weekly read
+
+[Timer]
+OnCalendar=Sun *-*-* 10:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

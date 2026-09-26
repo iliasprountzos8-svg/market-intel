@@ -20,12 +20,13 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import requests
 import trafilatura
 from dotenv import load_dotenv
 from supabase import create_client
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -46,10 +47,24 @@ HEADERS = {
 # network round-trip per article instead of failing after a timeout.
 BLOCKED_DOMAINS = ("investing.com",)
 
+class _HostTripped(Exception):
+    """Host already failed repeatedly in this run: skip instead of burning the time budget."""
+
+
+def _transient(exc):
+    """Retry only what can plausibly work on a second try: timeouts, connection errors, 5xx, 429.
+    A 401/403/404 (paywall, bot block, gone) will not improve, so it is not retried."""
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        code = exc.response.status_code
+        return code >= 500 or code == 429
+    return isinstance(exc, requests.RequestException)
+
+
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(requests.RequestException)
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=1, min=1, max=4),
+    retry=retry_if_exception(_transient),
+    reraise=True,
 )
 def robust_get(url, **kwargs):
     kwargs.setdefault("timeout", 15)
@@ -82,6 +97,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--delay", type=float, default=1.0, help="seconds between fetches, be polite")
+    parser.add_argument("--max-seconds", type=float, default=180, help="stop cleanly after this long; the rest waits for the next cycle")
+    parser.add_argument("--host-fail-limit", type=int, default=2, help="skip a host for the rest of the run after this many failures")
     args = parser.parse_args()
 
     client = get_client()
@@ -98,9 +115,14 @@ def main():
         log.info("Nothing to backfill.")
         return
 
-    ok, failed, skipped = 0, 0, 0
+    ok, failed, skipped, tripped = 0, 0, 0, 0
     source_metrics = {}
+    t0 = time.time()
+    host_fails = {}
     for row in rows:
+        if time.time() - t0 > args.max_seconds:
+            log.info(f"Time budget of {args.max_seconds:.0f}s reached; remaining rows wait for the next cycle.")
+            break
         now = datetime.now(timezone.utc).isoformat()
 
         if any(domain in row["url"] for domain in BLOCKED_DOMAINS):
@@ -112,8 +134,12 @@ def main():
             continue
 
         text = None
+        host = urlparse(row["url"]).hostname or ""
         try:
             real_url = resolve_url(row["url"])
+            host = urlparse(real_url).hostname or host
+            if host_fails.get(host, 0) >= args.host_fail_limit:
+                raise _HostTripped(host)
             # Use our own browser-like headers directly -- trafilatura's built-in
             # fetcher gets 401/403'd by several sources (MarketWatch, Seeking Alpha)
             # that a normal browser UA sails through.
@@ -122,8 +148,12 @@ def main():
             text = trafilatura.extract(downloaded) if downloaded else None
             if text and len(text) < 200:
                 text = None  # too short to be the real article body (likely a stub/consent page)
+        except _HostTripped:
+            tripped += 1
+            text = None
         except Exception as e:
             log.warning(f"fetch failed for {row['url']}: {e}")
+            host_fails[host] = host_fails.get(host, 0) + 1
             text = None
 
         payload = {
@@ -131,6 +161,7 @@ def main():
             "full_text_fetched_at": now,
         }
         if text:
+            host_fails[host] = 0
             payload["full_text"] = text
             # Re-derive tickers now that we have the real article body --
             # the title/RSS-snippet pass at scrape time misses almost every
@@ -163,7 +194,8 @@ def main():
         time.sleep(args.delay)
 
     log.info(f"Done. Full text fetched: {ok}, failed/unavailable: {failed}, "
-          f"skipped (known-blocked domain): {skipped}, total: {len(rows)}")
+          f"skipped (known-blocked domain): {skipped}, skipped by host breaker: {tripped}, "
+          f"total: {len(rows)}, elapsed: {time.time() - t0:.0f}s")
 
     health_metrics = list(source_metrics.values())
     if health_metrics:

@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly honest read of the paper ledger (research only)
+After=docker.service
+OnFailure=notify-fail@market-intel-ledger.service
+
+[Service]
+Type=oneshot
+User=ilias
+ExecStart=/usr/bin/python3 /home/ilias/market-intel/lab/ledger_report.py --notify
+CPUWeight=30
+IOSchedulingClass=idle

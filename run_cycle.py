@@ -51,7 +51,7 @@ NLP_PY = venv_python(NLP_DIR / ".venv")
 STEPS = [
     ("scrape", SCRAPER_DIR, [SCRAPER_PY, "scrape.py"]),
     ("ingest", INGEST_DIR, [INGEST_PY, "ingest.py"]),
-    ("fetch_fulltext", SCRAPER_DIR, [SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3"]),
+    ("fetch_fulltext", SCRAPER_DIR, ["timeout", "300", SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3", "--max-seconds", "180"]),  # bounded: slow sites must not hold up the cycle
     ("classify", ANALYSIS_DIR, [ANALYSIS_PY, "cli.py", "bulk-classify", "--rule-based", "--limit", "4000"]),
     ("finbert", NLP_DIR, [NLP_PY, "score_finbert.py", "--max-minutes", "15", "--threads", "4"]),
     ("populate", ANALYSIS_DIR, [ANALYSIS_PY, "populate_cells.py", "--hours", "72"]),
@@ -72,8 +72,9 @@ def run_step(name: str, cwd: Path, cmd: list[str]) -> bool:
     start = time.time()
     result = subprocess.run(cmd, cwd=cwd, text=True)
     elapsed = time.time() - start
-    ok = result.returncode == 0
-    status = "OK" if ok else f"FAILED (exit {result.returncode})"
+    timeboxed = name == "fetch_fulltext" and result.returncode == 124  # designed time-box, not a failure
+    ok = result.returncode == 0 or timeboxed
+    status = "TIME-BOXED (ok)" if timeboxed else ("OK" if ok else f"FAILED (exit {result.returncode})")
     log.info(f"Finished step: {name} - {status} ({elapsed:.1f}s)")
     return ok
 

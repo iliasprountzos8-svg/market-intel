@@ -92,3 +92,13 @@ Steps that only make sense on the homelab are gated by `MI_ENABLE_SIGNALS=1`, so
 * Unattended `claude -p` loads every account connector unless `--strict-mcp-config` is passed (134k tokens, and a needless exposure): always pass it.
 * Per-company feeds tag tangential stories with a ticker: phone alerts now require the headline to name the holding.
 * Holiday and half-loaded days must be dropped from price panels or rolling features blank out for weeks.
+
+## Reliability and security layers (2026-09-26 evening)
+Files: `homelab/bin/`, `homelab/systemd/` (+ `dropins/`), `homelab/system-tuning/`, `lab/ledger_report.py`.
+
+* **Watchdog** (`homelab-watchdog`, every 10 min): hung/stale cycle, fast lane, data flow, DB, services, containers, primary + USB backup age, disk, RAM, temperature, pending reboot, Tailscale key expiry, daily package integrity (debsums). ntfy alerts with cooldown and "resolved" notices; daily SSD wear CSV; per-step cycle timings (`homelab-watchdog.sh report`).
+* **USB second backup** (`homelab-backup-usb`, 05:15): `restic copy` to a stick mounted only during the job; Sundays prune + verify 5% + test restore. The stick also holds unrelated files, so data lives under `/homelab-backup/`.
+* **Resource fences**: batch jobs run at CPUWeight=30 with idle IO; cycle and fast lane MemoryHigh 2G / MemoryMax 3.5G. zram swap. Hardening drop-ins for SSH and kernel sysctl.
+* **Full-text fetch fix** (`scraper/fetch_fulltext.py`, `run_cycle.py`): the step failed the whole cycle when slow or blocking hosts exhausted the 240 s limit. Now: no retries on 4xx, per-host circuit breaker (2 failures), 180 s budget, and an outer exit 124 is a designed time-box, not a failure. First cycle after the change: 126 s (was 240 s timeout), 69/100 articles fetched.
+* **Ledger read** (`lab/ledger_report.py`, Sundays 10:30): per book/side, one observation per signal date, bootstrap 95% CI, hit rate, explicit multiple-testing caveat. Nothing has settled yet (first settlements about 2026-10-01).
+* **Lesson**: never edit a running bash script in place (bash reads by byte offset); write a temp file and `mv`. `systemctl is-active` is non-zero while a unit is "activating".
