@@ -113,6 +113,26 @@ class Clustering(unittest.TestCase):
         self.assertEqual(em("Apple (NASDAQ:AAPL) unveils phone"), {"AAPL"})
         self.assertEqual(em("Stocks rise on Fed hopes"), set())
 
+    def test_entity_matcher_can_ignore_case(self):
+        em = sl.EntityMatcher({"NVIDIA": "NVDA", "Microsoft": "MSFT"}, ignore_case=True)
+        self.assertEqual(em("Nvidia weighs stake in Anthropic"), {"NVDA"})
+        self.assertEqual(em("MICROSOFT and NVIDIA"), {"MSFT", "NVDA"})
+        self.assertEqual(sl.EntityMatcher({"NVIDIA": "NVDA"})("Nvidia rises"), set())  # exact-case default unchanged
+
+    def test_load_names_strips_suffixes_and_skips_ambiguous(self):
+        import json, tempfile, os
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            json.dump([{"symbol": "NVDA", "name": "NVIDIA Corp"}, {"symbol": "TGT", "name": "Target Corp"},
+                       {"symbol": "F", "name": "Ford Motor Company"}, {"symbol": "X", "name": "Ab Inc"}], f)
+        try:
+            names = sl.load_names(f.name)
+        finally:
+            os.unlink(f.name)
+        self.assertEqual(names.get("NVIDIA"), "NVDA")
+        self.assertNotIn("Target", names)
+        self.assertEqual(names.get("Ford Motor"), "F")
+        self.assertNotIn("Ab", names)
+
     def test_paraphrases_naming_the_same_company_still_merge_with_entities(self):
         self.ix = sl.StoryIndex(entity_fn=sl.EntityMatcher({"Microsoft": "MSFT"}))
         a, _ = self.ix.assign(art(1, "Microsoft announces $10 billion investment in Azure data centers in Europe"))
@@ -179,6 +199,11 @@ class Opinion(unittest.TestCase):
             self.assertEqual(sl.event_v2(t), "opinion", t)
         self.assertEqual(sl.event_v2("Procter & Gamble raises quarterly dividend by 5%"), "capital")
         self.assertEqual(sl.event_v2("Intel suspends dividend to preserve cash"), "capital")
+
+    def test_templated_stock_listicles_are_opinion(self):
+        for t in ("1 Cash-Producing Stock to Own for Decades and 2 We Brush Off", "2 Healthcare Stocks with Impressive Fundamentals and 1 Facing Challenges",
+                  "2 Large-Cap Stocks with Exciting Potential and 1 Facing Headwinds", "Links 9/25/2026"):
+            self.assertEqual(sl.event_v2(t), "opinion", t)
 
     def test_real_news_is_not_opinion(self):
         self.assertEqual(sl.event_v2("Nike reports quarterly earnings, revenue beats estimates"), "earnings")

@@ -74,20 +74,42 @@ def is_backfill(published_at, scraped_at, hours=BACKFILL_HOURS):
     return (scraped_at - published_at) > timedelta(hours=hours)
 
 
+AMBIG_NAMES = {"Target", "Ford", "Gap", "Match", "Ball", "Hess", "Amgen", "Dow", "Visa", "Southern", "General", "United", "American",
+               "First", "National", "Lowe"}
+_NAME_SUFFIX = re.compile(r"[,\.]?\s+(Inc\.?|Corp\.?|Corporation|Company|Co\.?|Ltd\.?|plc|Holdings?|Group|Incorporated|Class [ABC]|& Co\.?|\(The\)|The)\s*$", re.I)
+
+
+def load_names(sp500_json_path):
+    """S&P 500 company names (legal suffixes stripped) -> symbol, for headline entity matching. Skips ambiguous or very short names."""
+    import json
+    names = {}
+    for x in json.load(open(sp500_json_path, encoding="utf-8")):
+        name = x["name"]
+        for _ in range(3):
+            name = _NAME_SUFFIX.sub("", name).strip()
+        if name in AMBIG_NAMES or len(name) < 4 or (" " not in name and len(name) < 5):
+            continue
+        names[name] = x["symbol"]
+    return names
+
+
 class EntityMatcher:
-    """Which companies does a headline name? Exact-case company names (from names -> symbol) plus '(TICKER)' tags."""
+    """Which companies does a headline name? Exact-case company names (from names -> symbol) plus '(TICKER)' tags.
+    ignore_case=True also matches 'Nvidia' for 'NVIDIA' (used for merging, where missing a company is the riskier error)."""
 
     _PAREN = re.compile(r"\(\s*(?:[A-Za-z]+:)?([A-Z]{1,5}(?:[.-][A-Z])?)\s*\)")
 
-    def __init__(self, names=None):
-        self.names = names or {}
-        self.rx = (re.compile(r"(?<![A-Za-z0-9])(" + "|".join(re.escape(n) for n in sorted(self.names, key=len, reverse=True)) + r")(?![A-Za-z0-9])")
+    def __init__(self, names=None, ignore_case=False):
+        self.ignore_case = ignore_case
+        self.names = {(k.lower() if ignore_case else k): v for k, v in (names or {}).items()}
+        flags = re.I if ignore_case else 0
+        self.rx = (re.compile(r"(?<![A-Za-z0-9])(" + "|".join(re.escape(n) for n in sorted(self.names, key=len, reverse=True)) + r")(?![A-Za-z0-9])", flags)
                    if self.names else None)
 
     def __call__(self, title):
         found = {m.group(1) for m in self._PAREN.finditer(title or "")}
         if self.rx:
-            found |= {self.names[m.group(1)] for m in self.rx.finditer(title or "")}
+            found |= {self.names[m.group(1).lower() if self.ignore_case else m.group(1)] for m in self.rx.finditer(title or "")}
         return found
 
 
