@@ -51,6 +51,8 @@ NLP_PY = venv_python(NLP_DIR / ".venv")
 STEPS = [
     ("scrape", SCRAPER_DIR, [SCRAPER_PY, "scrape.py"]),
     ("ingest", INGEST_DIR, [INGEST_PY, "ingest.py"]),
+    ("sec8k", INGEST_DIR, [INGEST_PY, "sec8k.py"]),
+    ("stories", ANALYSIS_DIR, [ANALYSIS_PY, "stories.py"]),
     ("fetch_fulltext", SCRAPER_DIR, ["timeout", "300", SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3", "--max-seconds", "180"]),  # bounded: slow sites must not hold up the cycle
     ("classify", ANALYSIS_DIR, [ANALYSIS_PY, "cli.py", "bulk-classify", "--rule-based", "--limit", "4000"]),
     ("finbert", NLP_DIR, [NLP_PY, "score_finbert.py", "--max-minutes", "15", "--threads", "4"]),
@@ -64,7 +66,7 @@ STEPS = [
 # signals.py keeps its own SQLite store and pushes to ntfy: only meaningful on the homelab, so it is
 # opt-in (MI_ENABLE_SIGNALS=1) and skipped on GitHub Actions.
 if os.environ.get("MI_ENABLE_SIGNALS") != "1":
-    STEPS = [st for st in STEPS if st[0] not in ("signals", "ingest", "finbert", "mirror", "populate")]
+    STEPS = [st for st in STEPS if st[0] not in ("signals", "ingest", "sec8k", "stories", "finbert", "mirror", "populate")]
 
 
 def run_step(name: str, cwd: Path, cmd: list[str]) -> bool:

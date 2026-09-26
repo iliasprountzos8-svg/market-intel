@@ -102,14 +102,15 @@ def main():
     args = parser.parse_args()
 
     client = get_client()
-    res = (
+    q = (
         client.table("articles")
         .select("id,url,source,title,tickers_raw")
         .eq("full_text_fetch_attempted", False)
-        .order("published_at", desc=True)
-        .limit(args.limit)
-        .execute()
     )
+    if os.environ.get("MI_ENABLE_SIGNALS") == "1":
+        # homelab only (the real Supabase has no such columns): skip old news, most important stories first
+        q = q.eq("is_backfill", False).order("priority", desc=True, nullsfirst=False)
+    res = q.order("published_at", desc=True).limit(args.limit).execute()
     rows = res.data
     if not rows:
         log.info("Nothing to backfill.")
