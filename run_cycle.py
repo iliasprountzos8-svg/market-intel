@@ -51,7 +51,7 @@ NLP_PY = venv_python(NLP_DIR / ".venv")
 STEPS = [
     ("scrape", SCRAPER_DIR, [SCRAPER_PY, "scrape.py"]),
     ("ingest", INGEST_DIR, [INGEST_PY, "ingest.py"]),
-    ("fetch_fulltext", SCRAPER_DIR, [SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3"]),
+    ("fetch_fulltext", SCRAPER_DIR, ["timeout", "240", SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3"]),  # bounded: slow sites must not hold up the cycle
     ("classify", ANALYSIS_DIR, [ANALYSIS_PY, "cli.py", "bulk-classify", "--rule-based", "--limit", "4000"]),
     ("finbert", NLP_DIR, [NLP_PY, "score_finbert.py", "--max-minutes", "15", "--threads", "4"]),
     ("populate", ANALYSIS_DIR, [ANALYSIS_PY, "populate_cells.py", "--hours", "72"]),
