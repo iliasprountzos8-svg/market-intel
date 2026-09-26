@@ -292,6 +292,7 @@ def db():
     con.execute("pragma busy_timeout=180000")
     con.execute("create table if not exists snapshots2(ts text, symbol text, model text, idx real, z real, n_lead int, wsum real, att_n int, att_z real, primary key(ts, symbol, model))")
     con.execute("create table if not exists alerts(ts text, symbol text, kind text, detail text)")
+    con.execute("create index if not exists idx_snap2_sym_model_ts on snapshots2(symbol, model, ts)")  # zscore() filters by symbol+model; without this each of ~1,800 lookups scanned the whole table
     return con
 
 
