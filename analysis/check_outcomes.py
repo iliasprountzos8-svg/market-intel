@@ -21,7 +21,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
-import yfinance as yf
+import yfinance as yf  # noqa: F401 (kept for TICKER_MAP users)
 from dotenv import load_dotenv
 from supabase import create_client
 
@@ -29,6 +29,8 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 from logger import get_logger
+sys.path.append(str(Path(__file__).parent))
+import scoring
 
 log = get_logger("analysis.check_outcomes")
 
@@ -65,12 +67,8 @@ def get_client():
     return create_client(url, key)
 
 
-def resolve_symbol(theme: str):
-    t = theme.lower()
-    for key, symbol in TICKER_MAP.items():
-        if key in t:
-            return symbol
-    return None
+def resolve_symbol(theme: str, explicit=None):
+    return scoring.resolve_symbol(theme, explicit)
 
 
 def price_move_pct(symbol: str, since: datetime):
@@ -94,50 +92,47 @@ def main():
     args = parser.parse_args()
 
     client = get_client()
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=args.min_age_days)).isoformat()
-
-    res = (
-        client.table("ai_calls_log")
-        .select("id,ticker_or_theme,call,created_at")
-        .is_("outcome", "null")
-        .lte("created_at", cutoff)
-        .execute()
-    )
+    res = client.table("ai_calls_log").select("*").is_("outcome", "null").execute()
     calls = res.data
     if not calls:
-        log.info("No calls ready to check (either none logged, or all too recent).")
+        log.info("No unscored calls.")
         return
 
     checked, skipped = 0, 0
     for c in calls:
-        symbol = resolve_symbol(c["ticker_or_theme"])
+        symbol = resolve_symbol(c["ticker_or_theme"], c.get("symbol"))
         if not symbol:
-            log.warning(f"no symbol mapping for '{c['ticker_or_theme']}' -- add one to TICKER_MAP")
+            log.warning(f"no symbol mapping for '{c['ticker_or_theme']}' -- add one to scoring.TICKER_MAP")
             skipped += 1
             continue
 
         created = datetime.fromisoformat(c["created_at"].replace("Z", "+00:00"))
-        move = price_move_pct(symbol, created)
-        if move is None:
-            log.warning(f"no price data for {symbol} since {created.date()}")
-            skipped += 1
+        horizon = int(c.get("horizon_days") or scoring.DEFAULT_HORIZON_DAYS)
+        w = scoring.window_return(symbol, created, horizon, c.get("entry_price"))
+        if w is None:
+            skipped += 1  # window still open, or no price data yet: try again next cycle
             continue
 
-        if abs(move) < args.move_threshold:
-            outcome = "unclear"
-        elif (move > 0 and c["call"] == "bullish") or (move < 0 and c["call"] == "bearish"):
-            outcome = "correct"
-        elif c["call"] == "neutral":
-            outcome = "unclear"
-        else:
-            outcome = "incorrect"
+        outcome = scoring.verdict(c["call"], w["return_pct"], args.move_threshold)
+        update = {"outcome": outcome, "outcome_checked_at": datetime.now(timezone.utc).isoformat(),
+                  "exit_price": w["exit_price"], "asset_return_pct": round(w["return_pct"], 3),
+                  "resolved_at": datetime.now(timezone.utc).isoformat()}
+        if symbol in scoring.STOCKS:
+            b = scoring.window_return(scoring.BENCHMARK, created, horizon)
+            if b:
+                update["benchmark_return_pct"] = round(b["return_pct"], 3)
+                update["excess_return_pct"] = round(w["return_pct"] - b["return_pct"], 3)
+        for attempt in range(8):  # drop columns that migration 004 hasn't added yet
+            try:
+                client.table("ai_calls_log").update(update).eq("id", c["id"]).execute()
+                break
+            except Exception as e:  # noqa: BLE001
+                bad = next((k for k in list(update) if k not in ("outcome", "outcome_checked_at") and (f"'{k}'" in str(e) or f'"{k}"' in str(e) or f"column {k}" in str(e))), None)
+                if not bad:
+                    raise
+                update.pop(bad)
 
-        client.table("ai_calls_log").update({
-            "outcome": outcome,
-            "outcome_checked_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", c["id"]).execute()
-
-        log.info(f"{c['ticker_or_theme']:30s} called {c['call']:8s} -> {symbol:10s} moved {move:+.2f}% -> {outcome}")
+        log.info(f"{c['ticker_or_theme']:30s} called {c['call']:8s} -> {symbol:10s} {horizon}d {w['return_pct']:+.2f}% -> {outcome}")
         checked += 1
 
     log.info(f"Checked {checked}, skipped {skipped} (no symbol mapping or no data).")
