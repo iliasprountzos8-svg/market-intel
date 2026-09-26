@@ -1,0 +1,12 @@
+[Unit]
+Description=Market Intel HQ (live phone app, Tailscale-only, read-only DB role)
+After=network-online.target tailscaled.service docker.service
+Wants=tailscaled.service
+[Service]
+User=ilias
+ExecStart=/home/ilias/market-intel/lab/.venv/bin/python /home/ilias/services/hq/hq_app.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+[Install]
+WantedBy=multi-user.target

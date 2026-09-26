@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Market Intel">
+<meta name="theme-color" content="#0f1216"><link rel="manifest" href="manifest.json"><title>Market Intel</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#14171c;--mut:#6a7280;--line:#e3e6ea;--acc:#2563eb;--up:#15803d;--dn:#b91c1c;--warn:#b45309;--chip:#eef1f5}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--fg:#eceff3;--mut:#9aa3b0;--line:#252b34;--acc:#6b9bff;--up:#4ade80;--dn:#f87171;--warn:#fbbf24;--chip:#20262f}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,sans-serif;padding-bottom:calc(64px + env(safe-area-inset-bottom))}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 14px 8px;padding-top:calc(10px + env(safe-area-inset-top));border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+header h1{font-size:17px;margin:0;flex:1;white-space:nowrap}.dot{width:9px;height:9px;border-radius:50%;background:var(--mut)}.dot.on{background:var(--up)}.dot.bad{background:var(--dn)}
+#stat{font-size:10.5px;line-height:1.25;color:var(--mut);text-align:right;max-width:66%}main{padding:12px 12px 6px;max-width:720px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}.card h2{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--mut);margin:0 0 8px;font-weight:600}
+.row{display:flex;align-items:center;gap:8px}.grow{flex:1;min-width:0}.mut{color:var(--mut)}.sm{font-size:12px}.b{font-weight:600}
+.up{color:var(--up)}.dn{color:var(--dn)}.warn{color:var(--warn)}
+.strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin:0 -2px}.q{flex:0 0 auto;background:var(--chip);border-radius:10px;padding:6px 10px;min-width:82px}.q .n{font-size:11px;color:var(--mut)}.q .v{font-weight:600}
+.chip{display:inline-block;background:var(--chip);border-radius:999px;padding:3px 10px;font-size:12px;margin:0 6px 6px 0;cursor:pointer;border:1px solid transparent}.chip.on{border-color:var(--acc);color:var(--acc)}
+button{font:inherit;border:0;border-radius:10px;background:var(--acc);color:#fff;padding:11px 14px;font-weight:600;width:100%}button.sec{background:transparent;color:var(--acc);border:1px solid var(--acc)}button:disabled{opacity:.5}
+input{font:inherit;width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);margin-bottom:10px}
+.item{padding:9px 0;border-top:1px solid var(--line)}.item:first-child{border-top:0}.item a{color:var(--fg);text-decoration:none}.item .t{font-size:14px;margin-bottom:3px}
+.bar{height:6px;border-radius:3px;background:var(--chip);position:relative;flex:0 0 80px}.bar i{position:absolute;top:0;bottom:0;border-radius:3px}
+.tab{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:6}
+.tab a{flex:1;text-align:center;padding:10px 0 8px;font-size:11px;color:var(--mut);text-decoration:none}.tab a.on{color:var(--acc);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:5px 4px;text-align:left;border-top:1px solid var(--line)}th{color:var(--mut);font-weight:500;font-size:11px;border-top:0}
+pre{white-space:pre-wrap;font:inherit;margin:0}#dgt{font-size:14px;line-height:1.5}.pill{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--chip);color:var(--mut)}
+svg{display:block}.banner{background:var(--chip);border-radius:10px;padding:8px 10px;font-size:12px;color:var(--mut);margin-bottom:12px}
+</style></head><body>
+<header><div class="dot" id="dot"></div><h1>Market Intel</h1><div id="stat">connecting...</div></header>
+<main id="main"></main>
+<nav class="tab" id="tab"></nav>
+<script>
+"use strict";
+const $=(s,r=document)=>r.querySelector(s);
+function h(tag,attrs,...kids){const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs||{})){if(k==="class")e.className=v;else if(k==="onclick")e.onclick=v;else if(k==="style")e.style.cssText=v;else if(k==="href"){if(/^https?:/.test(v)){e.setAttribute("href",v);e.setAttribute("rel","noopener noreferrer");e.setAttribute("target","_blank")}}else e.setAttribute(k,v)}
+for(const k of kids.flat()){if(k===null||k===undefined||k===false)continue;e.append(k.nodeType?k:document.createTextNode(String(k)))}return e}
+const api=(p,opt)=>fetch("api/"+p,opt).then(r=>r.json());
+const ago=t=>{const s=(Date.now()-new Date(t).getTime())/1000;if(isNaN(s))return"";if(s<90)return"now";if(s<3600)return Math.round(s/60)+"m";if(s<86400)return Math.round(s/3600)+"h";return Math.round(s/86400)+"d"};
+const pct=(v,d=1)=>v===null||v===undefined?"-":(v>=0?"+":"")+v.toFixed(d)+"%";
+const cls=v=>v>0.0001?"up":v<-0.0001?"dn":"mut";
+const sdot=fb=>{const c=fb===null||fb===undefined?"var(--mut)":fb>0.15?"var(--up)":fb<-0.15?"var(--dn)":"var(--mut)";return h("span",{style:`display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};margin-right:6px`})};
+function spark(vals,w=280,hh=54,color="var(--acc)"){const ns="http://www.w3.org/2000/svg";const s=document.createElementNS(ns,"svg");s.setAttribute("viewBox",`0 0 ${w} ${hh}`);s.setAttribute("width","100%");s.setAttribute("height",hh);
+const v=vals.filter(x=>x!==null&&x!==undefined&&!isNaN(x));if(v.length<2)return s;const mn=Math.min(...v),mx=Math.max(...v),r=(mx-mn)||1;
+const pts=v.map((y,i)=>`${(i/(v.length-1)*w).toFixed(1)},${(hh-3-(y-mn)/r*(hh-6)).toFixed(1)}`).join(" ");const p=document.createElementNS(ns,"polyline");p.setAttribute("points",pts);p.setAttribute("fill","none");p.setAttribute("stroke",color);p.setAttribute("stroke-width","2");p.setAttribute("stroke-linejoin","round");s.append(p);return s}
+function bars(vals,w=280,hh=46,color="var(--acc)"){const ns="http://www.w3.org/2000/svg";const s=document.createElementNS(ns,"svg");s.setAttribute("viewBox",`0 0 ${w} ${hh}`);s.setAttribute("width","100%");s.setAttribute("height",hh);
+const mx=Math.max(1,...vals),bw=w/vals.length;vals.forEach((y,i)=>{const r=document.createElementNS(ns,"rect");const bh=y/mx*(hh-2);r.setAttribute("x",(i*bw+1).toFixed(1));r.setAttribute("y",(hh-bh).toFixed(1));r.setAttribute("width",Math.max(1,bw-2).toFixed(1));r.setAttribute("height",bh.toFixed(1));r.setAttribute("rx","2");r.setAttribute("fill",color);s.append(r)});return s}
+function idxbar(v){const w=Math.min(1,Math.abs(v||0)),pos=(v||0)>=0;return h("div",{class:"bar"},h("i",{style:`background:${pos?"var(--up)":"var(--dn)"};${pos?"left:50%":"right:50%"};width:${w*50}%`}))}
+
+const TABS=[["home","Home"],["news","News"],["ticker","Tickers"],["lab","Lab"],["system","System"]];
+let cur={tab:"home",arg:null},SYMS=null,busy=false,newsState={f:"",q:"",items:[]};
+function route(){const x=(location.hash||"#home").slice(1).split("/");cur={tab:TABS.some(t=>t[0]===x[0])?x[0]:"home",arg:x[1]||null};draw()}
+window.addEventListener("hashchange",route);
+function navbar(){const t=$("#tab");t.replaceChildren(...TABS.map(([k,l])=>h("a",{href:"#"+k,class:cur.tab===k?"on":"",onclick:e=>{e.preventDefault();location.hash=k}},l)))}
+function articleRow(a){const meta=[a.source,ago(a.published_at)];if(a.greek)meta.push("EL");(a.tickers_raw||[]).slice(0,3).forEach(t=>meta.push(t));
+const fbv=a.greek?null:a.fb;return h("div",{class:"item"},h("div",{class:"t"},sdot(fbv),h("a",{href:a.url},a.title)),h("div",{class:"sm mut"},meta.join(" · "),a.claude?h("span",{class:"pill",style:"margin-left:6px"},"Claude"):null,fbv!==null&&fbv!==undefined?h("span",{class:"pill",style:"margin-left:6px"},"FinBERT "+(fbv>=0?"+":"")+fbv.toFixed(2)):null))}
+function tickerChip(s){return h("span",{class:"chip",onclick:()=>location.hash="ticker/"+s},s)}
+
+/* ---------------- live bar ---------------- */
+async function live(){try{const d=await api("live");const m=/^(started|finished) (\S+)(?: rc=(\d+))?/.exec(d.pull.text||"");
+const ok=!m||m[1]==="started"||m[3]==="0";$("#dot").className="dot "+(ok?"on":"bad");
+$("#stat").textContent=`${d.counts.total.toLocaleString()} articles · +${d.counts.h1}/h · newest ${ago(d.counts.newest)} · cycle ${m?(d.pull.running?"running":ago(m[2])):"?"}`;
+window.__live=d;return d}catch(e){$("#dot").className="dot bad";$("#stat").textContent="offline (is Tailscale on?)"}}
+
+/* ---------------- HOME ---------------- */
+async function home(){const d=await api("home"),L=window.__live||{},M=$("#main");M.replaceChildren();
+const strip=h("div",{class:"strip"});for(const[s,v]of Object.entries(d.quotes||{}))strip.append(h("div",{class:"q",onclick:()=>{if(/^[A-Z]+$/.test(s))location.hash="ticker/"+s}},h("div",{class:"n"},v.name+(v.live?"":" ·close")),h("div",{class:"v"},v.last>=1000?v.last.toFixed(0):v.last.toFixed(2)),h("div",{class:"sm "+cls(v.d1)},pct(v.d1))));
+M.append(h("div",{class:"card"},h("h2",{},"Markets"),strip));
+if(d.digest){const c=h("div",{class:"card"},h("h2",{},"Latest digest · "+ago(d.digest.created_at)+" ago"),h("pre",{style:"max-height:9.5em;overflow:hidden",id:"dgt"},d.digest.summary));
+const more=h("button",{class:"sec",style:"margin-top:8px",onclick:()=>{const p=$("#dgt");const open=p.style.maxHeight==="none";p.style.maxHeight=open?"9.5em":"none";more.textContent=open?"Read more":"Show less"}},"Read more");c.append(more);
+if(d.digest.guidance)c.append(h("div",{class:"sm mut",style:"margin-top:8px"},"Guidance: "+d.digest.guidance));M.append(c)}
+const sg=d.signals,card=h("div",{class:"card"},h("h2",{},"News signals now · index vs the ticker's own norm"));
+const held=HOLDINGS_LIST().map(s=>{const m=(sg.holdings[s]||{}).ens;return h("div",{class:"row item",onclick:()=>location.hash="ticker/"+s},h("div",{class:"b",style:"width:56px"},s),idxbar(m&&m.idx),h("div",{class:"grow sm mut"},m?`idx ${m.idx.toFixed(2)} · z ${m.z===null?"n/a":m.z.toFixed(1)} · ${m.n} stories`:"no data"))});
+card.append(...held);card.append(h("div",{class:"sm mut",style:"margin:8px 0 4px"},"Biggest moves in the S&P 500"));
+sg.top.slice(0,8).forEach(x=>card.append(h("div",{class:"row item",onclick:()=>location.hash="ticker/"+x.symbol},h("div",{class:"b",style:"width:56px"},x.symbol),idxbar(x.idx),h("div",{class:"grow sm mut"},`z ${x.z===null?"n/a":x.z.toFixed(1)} · ${x.n} stories · attention ${x.att_z.toFixed(1)}`))));
+M.append(card);
+if(sg.alerts.length)M.append(h("div",{class:"card"},h("h2",{},"Recent signal alerts"),...sg.alerts.slice(0,4).map(a=>h("div",{class:"item sm"},h("span",{class:"b"},a.symbol+" · "+ago(a.ts)+" "),a.detail.slice(0,150)))));
+M.append(h("div",{class:"card"},h("h2",{},"Headlines on your holdings"),...(d.headlines.length?d.headlines.map(articleRow):[h("div",{class:"mut sm"},"Nothing in the last 36 hours.")])));
+if(d.lab)M.append(h("div",{class:"card",onclick:()=>location.hash="lab"},h("h2",{},"Prediction lab · "+d.lab.as_of),...Object.entries(d.lab.top5||{}).map(([b,t])=>h("div",{class:"sm",style:"margin:3px 0"},h("span",{class:"b"},b+": "),t.join(" · "))),h("div",{class:"sm mut",style:"margin-top:6px"},d.lab.open+" open paper positions · research only, not advice")));
+const running=L.pull&&L.pull.running,drun=L.digest&&L.digest.running;
+M.append(h("div",{class:"card"},h("h2",{},"Controls"),h("button",{id:"bp",onclick:()=>run("pull")},running?"Data pull running...":"Pull data now"),h("div",{style:"height:8px"}),h("button",{id:"bd",class:"sec",onclick:()=>run("digest")},drun?"Digest running...":"Generate digest"),h("div",{class:"sm mut",id:"rm",style:"margin-top:8px"})));}
+const HOLDINGS_LIST=()=>["NVDA","MSFT","GOOGL","ASML"];
+async function run(j){const r=await api("run/"+j,{method:"POST"});$("#rm").textContent=j+": "+r.result;setTimeout(live,1500)}
+
+/* ---------------- NEWS ---------------- */
+async function news(reset=true){const M=$("#main");if(reset){M.replaceChildren();newsState.items=[];
+const inp=h("input",{placeholder:"Search headlines",value:newsState.q,onchange:e=>{newsState.q=e.target.value;news(true)}});
+const chips=h("div",{});[["","All"],["holdings","My holdings"],["pos","Positive"],["neg","Negative"],["claude","Claude-analysed"],["filings","SEC filings"]].forEach(([k,l])=>chips.append(h("span",{class:"chip"+(newsState.f===k?" on":""),onclick:()=>{newsState.f=k;news(true)}},l)));
+M.append(inp,chips,h("div",{class:"card",id:"nl"}))}
+const last=newsState.items.length?newsState.items[newsState.items.length-1].published_at:"";
+const qs=`limit=30&hours=96&f=${newsState.f}&q=${encodeURIComponent(newsState.q)}`+(last?`&before=${encodeURIComponent(last)}`:"");
+const d=await api("news?"+qs);newsState.items.push(...d.items);const nl=$("#nl");d.items.forEach(a=>nl.append(articleRow(a)));
+const old=$("#more");if(old)old.remove();if(d.items.length>=30)nl.append(h("button",{id:"more",class:"sec",style:"margin-top:10px",onclick:()=>news(false)},"Load more"));if(!newsState.items.length)nl.append(h("div",{class:"mut sm"},"No articles match."))}
+
+/* ---------------- TICKERS ---------------- */
+async function tickers(){const M=$("#main");M.replaceChildren();if(!SYMS)SYMS=(await api("symbols")).symbols;
+if(cur.arg)return tickerPage(cur.arg);
+const res=h("div",{class:"card"}),inp=h("input",{placeholder:"Search a company or ticker (S&P 500)",oninput:e=>show(e.target.value)});
+function show(v){res.replaceChildren();v=v.trim().toLowerCase();const list=(v?SYMS.filter(s=>s.s.toLowerCase().startsWith(v)||s.n.toLowerCase().includes(v)):SYMS.filter(s=>["NVDA","MSFT","GOOGL","ASML","AAPL","AMZN","META","TSLA","AVGO","JPM","XOM","LLY"].includes(s.s))).slice(0,30);
+list.forEach(s=>res.append(h("div",{class:"item row",onclick:()=>location.hash="ticker/"+s.s},h("div",{class:"b",style:"width:64px"},s.s),h("div",{class:"grow sm"},s.n,h("div",{class:"mut sm"},s.sec)))))}
+M.append(inp,res);show("")}
+let modelSel="ens";
+async function tickerPage(sym){const M=$("#main");const d=await api("ticker/"+encodeURIComponent(sym));if(d.error){M.append(h("div",{class:"card"},d.error));return}
+M.replaceChildren(h("div",{class:"sm mut",style:"margin-bottom:6px"},h("a",{href:"#ticker",style:"color:var(--acc);text-decoration:none",onclick:e=>{e.preventDefault();location.hash="ticker"}},"< Tickers")));
+const p=d.perf;M.append(h("div",{class:"card"},h("div",{class:"row"},h("div",{class:"grow"},h("div",{style:"font-size:20px;font-weight:700"},d.symbol),h("div",{class:"sm mut"},d.name+(d.sector?" · "+d.sector:""))),p?h("div",{style:"text-align:right"},h("div",{class:"b"},p.last.toFixed(2)),h("div",{class:"sm "+cls(p.d1)},pct(p.d1)+" 1d"),h("div",{class:"sm "+cls(p.d5)},pct(p.d5)+" 5d")):null),d.price.length?h("div",{style:"margin-top:8px"},spark(d.price.map(x=>x[1])),h("div",{class:"sm mut"},"Price, last 90 trading days")):null));
+const sc=h("div",{class:"card"},h("h2",{},"News sentiment index · 14 days"));const tabs=h("div",{});["ens","finbert","lex","old"].forEach(m=>tabs.append(h("span",{class:"chip"+(modelSel===m?" on":""),onclick:()=>{modelSel=m;tickerPage(sym)}},{ens:"Ensemble",finbert:"FinBERT",lex:"Lexicon",old:"Old labels"}[m])));sc.append(tabs);
+const ser=(d.series[modelSel]||[]).map(x=>x[1]);sc.append(ser.length>2?spark(ser,280,60,"var(--warn)"):h("div",{class:"mut sm"},"Not enough coverage for this ticker yet."));
+const cu=d.current;sc.append(h("table",{},h("tr",{},h("th",{},"Model"),h("th",{},"Index"),h("th",{},"z"),h("th",{},"Stories 24h")),...["ens","finbert","lex","old"].filter(m=>cu[m]).map(m=>h("tr",{},h("td",{},m),h("td",{class:cls(cu[m].idx)},cu[m].idx.toFixed(2)),h("td",{},cu[m].z===null?"n/a":cu[m].z.toFixed(1)),h("td",{},cu[m].n)))));
+sc.append(h("div",{class:"sm mut",style:"margin-top:6px"},"Index is relative to each source's normal tone; z compares with this ticker's own 14 days. Small samples, not advice."));M.append(sc);
+if(d.lab.length||d.positions.length){const c=h("div",{class:"card"},h("h2",{},"In the prediction lab"));d.lab.forEach(x=>c.append(h("div",{class:"sm"},`${x.book}: rank #${x.rank} today`)));d.positions.slice(0,6).forEach(x=>c.append(h("div",{class:"sm mut"},`${x.book} ${x.side} ${x.signal_date} · ${x.status}${x.net_excess_pct!==null?" · net "+pct(x.net_excess_pct,2):""}`)));M.append(c)}
+M.append(h("div",{class:"card"},h("h2",{},"Latest news"),...(d.news.length?d.news.map(articleRow):[h("div",{class:"mut sm"},"No recent articles.")])))}
+
+/* ---------------- LAB ---------------- */
+async function lab(){const d=await api("lab"),M=$("#main");M.replaceChildren();
+M.append(h("div",{class:"banner"},"Research and paper trading only. Nothing here is investment advice. Strategies must show many settled positions with positive net excess return over the S&P 500 before anyone should trust them."));
+const books=[...new Set(d.top.map(x=>x.book))];
+books.forEach(b=>{const t=d.top.filter(x=>x.book===b),a=d.avoid.filter(x=>x.book===b),lg=d.ledger.filter(x=>x.book===b);
+const c=h("div",{class:"card"},h("h2",{},b+" · "+d.as_of),h("div",{class:"sm mut"},"Top picks"),h("div",{},...t.map(x=>tickerChip(x.symbol))),h("div",{class:"sm mut"},"Avoid"),h("div",{},...a.map(x=>tickerChip(x.symbol))));
+lg.forEach(x=>c.append(h("div",{class:"sm"},`${x.side}: ${x.n} settled, ${x.open} open`+(x.n>0?` · net vs S&P ${pct(x.net,2)} · hit ${(x.hit*100).toFixed(0)}%`:" · first settlements ~5 trading days after entry"))));M.append(c)});
+[5,20].forEach(hh=>{const w=d.walkforward[hh];if(!w)return;M.append(h("div",{class:"card"},h("h2",{},`Walk-forward test · ${hh}-day horizon`),h("table",{},h("tr",{},h("th",{},"Strategy"),h("th",{},"IC"),h("th",{},"t"),h("th",{},"Net spread")),...w.results.filter(r=>r.ic_mean!==undefined).map(r=>h("tr",{},h("td",{},r.name),h("td",{},r.ic_mean.toFixed(3)),h("td",{},r.ic_t.toFixed(1)),h("td",{class:cls(r.spread_net_pct)},pct(r.spread_net_pct,2))))),h("div",{class:"sm mut",style:"margin-top:6px"},w.note||"")))});
+if(d.signal_eval)M.append(h("div",{class:"card"},h("h2",{},"Does the news signal predict prices?"),h("pre",{class:"sm mut"},d.signal_eval.split("\n").slice(-1)[0])))}
+
+/* ---------------- SYSTEM ---------------- */
+async function system(){const d=await api("system"),M=$("#main");M.replaceChildren();
+const st=(l,t)=>h("div",{class:"sm",style:"margin:3px 0"},h("span",{class:"b"},l+": "),t||"-");
+M.append(h("div",{class:"card"},h("h2",{},"Pipeline"),st("Full cycle (every 30 min)",d.pull),st("Fast lane (every 5 min)",d.fast),st("Digest job",d.digest),st("Database",d.db_size)));
+M.append(h("div",{class:"card"},h("h2",{},"Articles per day · 14 days"),bars(d.perday.map(x=>x.n)),h("div",{class:"sm mut"},d.perday.length?`${d.perday[0].d} to ${d.perday[d.perday.length-1].d}`:"")));
+M.append(h("div",{class:"card"},h("h2",{},"Ingest runs · last 24h (new articles)"),bars(d.runs.map(x=>x.entries_fetched))));
+M.append(h("div",{class:"card"},h("h2",{},"Sources"),h("table",{},h("tr",{},h("th",{},"Kind"),h("th",{},"Feeds"),h("th",{},"Enabled"),h("th",{},"Failing")),...d.kinds.map(k=>h("tr",{},h("td",{},k.kind),h("td",{},k.n),h("td",{},k.en),h("td",{class:k.failing?"dn":""},k.failing)))),...d.failing.map(f=>h("div",{class:"sm mut"},`${f.name}: ${f.fail_count} failures (last http ${f.last_status})`))));
+const tr=d.track;M.append(h("div",{class:"card"},h("h2",{},"Track record of calls"),tr?h("div",{class:"sm"},`${tr.n_decided} decided calls. ${tr.verdict}`):h("div",{class:"sm mut"},"No report yet."),...d.calls.slice(0,10).map(c=>h("div",{class:"item sm"},h("span",{class:"b"},c.call+" "+c.ticker_or_theme),(c.horizon_days?` · ${c.horizon_days}d`:"")+(c.confidence!==null?` · conf ${c.confidence}`:"")+" · ",h("span",{class:c.outcome==="correct"?"up":c.outcome==="incorrect"?"dn":"mut"},c.outcome||"pending")))))}
+
+let last=0;
+async function draw(){navbar();window.scrollTo(0,0);try{await live();({home,news:()=>news(true),ticker:tickers,lab,system})[cur.tab]()}catch(e){$("#main").replaceChildren(h("div",{class:"card"},"Error: "+e))}}
+setInterval(async()=>{if(document.hidden)return;await live();if(cur.tab==="home"&&!busy){busy=true;try{await home()}finally{busy=false}}else if(cur.tab==="system"&&!busy){busy=true;try{await system()}finally{busy=false}}},20000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)draw()});
+route();
+</script></body></html>

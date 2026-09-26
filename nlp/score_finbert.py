@@ -46,7 +46,7 @@ def main():
             cur.execute(
                 """select a.id, a.title, left(coalesce(a.summary_raw, ''), 400)
                    from articles a left join article_scores s on s.article_id = a.id and s.model = 'finbert'
-                   where s.article_id is null and a.published_at > now() - make_interval(days => %s)
+                   where s.article_id is null and a.published_at > now() - make_interval(days => %s) and a.title !~ '[Α-Ωα-ωά-ώ]'
                    order by a.published_at desc limit 256""", (args.days,))
             rows = cur.fetchall()
         if not rows:
@@ -72,7 +72,7 @@ def main():
         else:
             break
     with conn.cursor() as cur:
-        cur.execute("select count(*) from articles a left join article_scores s on s.article_id=a.id and s.model='finbert' where s.article_id is null and a.published_at > now() - make_interval(days => %s)", (args.days,))
+        cur.execute("select count(*) from articles a left join article_scores s on s.article_id=a.id and s.model='finbert' where s.article_id is null and a.published_at > now() - make_interval(days => %s) and a.title !~ '[Α-Ωα-ωά-ώ]'", (args.days,))
         remaining = cur.fetchone()[0]
     el = time.time() - t0
     print(f"finbert: scored {done} in {el:.0f}s ({done / max(el, 1):.1f}/s) | backlog remaining {remaining}")

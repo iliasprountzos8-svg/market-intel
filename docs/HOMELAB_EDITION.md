@@ -21,6 +21,22 @@ GitHub Actions and the Vercel dashboard keep working; the homelab is now the pri
 | Alerts | Web push / email (disabled) | ntfy phone alerts: signal spikes, digests, failures (quality-gated) |
 | Control | dashboard only | + private phone control page (pull, digest, lab, status) |
 
+## Market Intel HQ: the live phone app (added 2026-09-26)
+`homelab/hq/` (`hq_app.py` + `index.html`, no build step, no external libraries) is served from the homelab on the Tailscale IP at the
+same secret link as the old control page, and reads the LOCAL database directly through a read-only Postgres role (`hq_ro`).
+
+| Tab | What you see |
+|---|---|
+| Home | live market strip, latest digest, news-sentiment signals for your holdings and the biggest S&P 500 moves, signal alerts, headlines that name your holdings, lab picks, controls (pull data, generate digest) |
+| News | searchable feed of all ~27k articles with filters (holdings, positive, negative, Claude-analysed, SEC filings), FinBERT scores, duplicate stories collapsed |
+| Tickers | any S&P 500 company: price, 14-day sentiment index per model, current signals, lab ranks and paper positions, strict news |
+| Lab | each strategy's top picks / avoid list, paper-ledger results, walk-forward tables, signal test verdict, research-only banner |
+| System | pipeline status, articles per day, ingest runs, source health, DB size, track record of calls |
+
+Live-ness: the header refreshes every 20 s; a **fast lane** (`run_fast.sh`, every 5 min) pulls the feeds that are due, classifies and FinBERT-scores new
+articles, and top sources poll faster (outlets 10 min, SEC 8-K 5 min, Yahoo tier A 15 min). The full 30-minute cycle still does full text, the sentiment
+index, outcome checks, alerts and the Supabase mirror. Quotes come from Yahoo (cached 90 s) with the nightly file as fallback.
+
 ## Pipeline (every 30 minutes, `homelab/scripts/run_pull.sh`)
 `scrape (legacy) -> ingest -> fetch_fulltext -> classify -> finbert -> signals -> correlate -> check_outcomes -> notify -> mirror`
 Steps that only make sense on the homelab are gated by `MI_ENABLE_SIGNALS=1`, so the GitHub Actions run is unchanged.
