@@ -122,6 +122,8 @@ if(d.signal_eval)M.append(h("div",{class:"card"},h("h2",{},"Does the news signal
 async function system(){const d=await api("system"),M=$("#main");M.replaceChildren();
 const st=(l,t)=>h("div",{class:"sm",style:"margin:3px 0"},h("span",{class:"b"},l+": "),t||"-");
 M.append(h("div",{class:"card"},h("h2",{},"Pipeline"),st("Full cycle (every 30 min)",d.pull),st("Fast lane (every 5 min)",d.fast),st("Digest job",d.digest),st("Database",d.db_size)));
+if(d.dq&&d.dq.length)M.append(h("div",{class:"card"},h("h2",{},"News quality"),...d.dq.map(m=>st(m.name.replace(/_/g," "),String(Math.round(m.value*10)/10)))));
+if(d.stories&&d.stories.length)M.append(h("div",{class:"card"},h("h2",{},"Top stories · 24h"),...d.stories.map(s=>h("div",{class:"item sm"},h("span",{class:"b"},"["+(s.event||"other")+"] "),String(s.title).slice(0,90),s.takeaway?h("div",{class:"sm mut"},"read: "+s.takeaway):""))));
 M.append(h("div",{class:"card"},h("h2",{},"Articles per day · 14 days"),bars(d.perday.map(x=>x.n)),h("div",{class:"sm mut"},d.perday.length?`${d.perday[0].d} to ${d.perday[d.perday.length-1].d}`:"")));
 M.append(h("div",{class:"card"},h("h2",{},"Ingest runs · last 24h (new articles)"),bars(d.runs.map(x=>x.entries_fetched))));
 M.append(h("div",{class:"card"},h("h2",{},"Sources"),h("table",{},h("tr",{},h("th",{},"Kind"),h("th",{},"Feeds"),h("th",{},"Enabled"),h("th",{},"Failing")),...d.kinds.map(k=>h("tr",{},h("td",{},k.kind),h("td",{},k.n),h("td",{},k.en),h("td",{class:k.failing?"dn":""},k.failing)))),...d.failing.map(f=>h("div",{class:"sm mut"},`${f.name}: ${f.fail_count} failures (last http ${f.last_status})`))));

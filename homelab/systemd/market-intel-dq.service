@@ -1,0 +1,15 @@
+[Unit]
+Description=Data-quality metrics snapshot
+After=docker.service
+OnFailure=notify-fail@market-intel-dq.service
+
+[Service]
+Type=oneshot
+User=ilias
+WorkingDirectory=/home/ilias/market-intel/analysis
+Environment=PATH=/home/ilias/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ilias/market-intel/analysis/.venv/bin/python dq_metrics.py
+TimeoutStartSec=15min
+CPUWeight=30
+IOSchedulingClass=idle
+MemoryHigh=1G

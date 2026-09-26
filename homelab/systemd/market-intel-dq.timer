@@ -1,0 +1,10 @@
+[Unit]
+Description=Schedule for market-intel-dq
+
+[Timer]
+OnCalendar=*-*-* *:50:00
+Persistent=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

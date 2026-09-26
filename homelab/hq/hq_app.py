@@ -305,7 +305,14 @@ def api_system(_):
     size = q("select pg_size_pretty(pg_database_size('marketintel')) s")[0]["s"]
     calls = q("select created_at, ticker_or_theme, call, confidence, horizon_days, outcome, asset_return_pct from ai_calls_log order by created_at desc limit 15")
     tr = read_json(LOGS / "track-record.json")
-    return {"kinds": kinds, "failing": failing, "runs": runs, "perday": perday, "db_size": size, "calls": calls,
+    try:
+        dq = q("select name, value from dq_metrics where ts = (select max(ts) from dq_metrics) order by name")
+        stories = q("select s.title, s.event, s.n_sources, s.priority, r.result->>'takeaway' as takeaway from stories s "
+                    "left join story_reads r on r.story_id = s.story_id where not s.is_backfill and s.first_seen > now() - interval '24 hours' "
+                    "order by s.priority desc limit 8")
+    except Exception:  # noqa: BLE001 - tables missing on a fresh install: the rest of the page still works
+        dq, stories = [], []
+    return {"dq": dq, "stories": stories, "kinds": kinds, "failing": failing, "runs": runs, "perday": perday, "db_size": size, "calls": calls,
             "track": tr, "pull": read_text(LOGS / "cycle-status.txt"), "fast": read_text(LOGS / "fast-status.txt"), "digest": read_text(LOGS / "digest-status.txt")}
 
 
