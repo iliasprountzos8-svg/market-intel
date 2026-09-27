@@ -25,6 +25,9 @@ import pandas as pd
 import psycopg
 from psycopg.rows import dict_row
 
+# joblock.py sits next to hq_app.py in the deployed layout (~/services/hq/) and one level up
+# in the repo layout (homelab/joblock.py, shared with homelab/sync_daemon.py) -- try both.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from joblock import is_running as _is_running, start_job as _start_job  # noqa: E402
 
