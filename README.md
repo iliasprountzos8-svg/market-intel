@@ -15,7 +15,15 @@ supabase/    schema.sql -- run once in the Supabase SQL editor
 analysis/    CLI Claude uses on-demand to read unprocessed articles and write AI columns,
              plus correlate.py and check_outcomes.py (see "The improvement loop")
 dashboard/   Next.js live dashboard (deploy free on Vercel)
+tests/       python -m unittest discover -s tests
 ```
+
+The tree above is the original free-tier layout. The homelab edition adds
+`ingest/` (SEC filings), `nlp/` (local FinBERT + embeddings), `lab/`
+(prediction lab), `deal-radar/` (an unrelated personal side tool), and
+`homelab/` (systemd units, the HQ phone app, the local Postgres compose
+stack, migrations) -- see [docs/HOMELAB_EDITION.md](docs/HOMELAB_EDITION.md)
+for that part of the system.
 
 ## Running the cycle
 

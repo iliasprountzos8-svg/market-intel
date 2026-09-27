@@ -14,20 +14,13 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-import psycopg
-from dotenv import dotenv_values
-
 sys.path.insert(0, str(Path(__file__).parent))
 import story_logic as sl  # noqa: E402
+from db import connect  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCK_ID = 7461
 _ITEMS = re.compile(r"Items?:\s*([0-9., ]+)")
-
-
-def connect():
-    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
-    return psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"])
 
 
 def load_universe():

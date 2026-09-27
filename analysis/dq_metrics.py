@@ -35,11 +35,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--print", dest="only_print", action="store_true")
     a = ap.parse_args()
-    import psycopg
-    from dotenv import dotenv_values
-    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
+    sys.path.insert(0, str(Path(__file__).parent))
+    from db import connect
     out = {}
-    with psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"]) as conn, conn.cursor() as cur:
+    with connect() as conn, conn.cursor() as cur:
         for name, sql in METRICS.items():
             try:
                 cur.execute(sql)

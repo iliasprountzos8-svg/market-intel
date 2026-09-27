@@ -11,15 +11,10 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import psycopg
-from dotenv import dotenv_values
+sys.path.insert(0, str(Path(__file__).parent))
+from db import connect  # noqa: E402
 
 PER_TICKER = ("Yahoo Finance", "Seeking Alpha", "Nasdaq.com")
-
-
-def connect():
-    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
-    return psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"])
 
 
 def main():

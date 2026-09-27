@@ -15,12 +15,13 @@ from pathlib import Path
 os.environ.setdefault("HF_HUB_OFFLINE", "1")  # model is cached locally after the first download
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-import psycopg  # noqa: E402
+import sys  # noqa: E402
 import torch  # noqa: E402
-from dotenv import dotenv_values  # noqa: E402
 from transformers import AutoModelForSequenceClassification, AutoTokenizer  # noqa: E402
 
 ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT / "analysis"))
+from db import connect  # noqa: E402
 MODEL = "ProsusAI/finbert"
 
 
@@ -33,8 +34,7 @@ def main():
     args = ap.parse_args()
     t0 = time.time()
     torch.set_num_threads(args.threads)
-    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
-    conn = psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"], autocommit=False)
+    conn = connect(autocommit=False)
     tok = AutoTokenizer.from_pretrained(MODEL)
     model = AutoModelForSequenceClassification.from_pretrained(MODEL).eval()
     id2 = {v.lower(): k for k, v in model.config.id2label.items()}

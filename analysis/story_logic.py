@@ -83,7 +83,9 @@ def load_names(sp500_json_path):
     """S&P 500 company names (legal suffixes stripped) -> symbol, for headline entity matching. Skips ambiguous or very short names."""
     import json
     names = {}
-    for x in json.load(open(sp500_json_path, encoding="utf-8")):
+    with open(sp500_json_path, encoding="utf-8") as f:
+        sp500 = json.load(f)
+    for x in sp500:
         name = x["name"]
         for _ in range(3):
             name = _NAME_SUFFIX.sub("", name).strip()

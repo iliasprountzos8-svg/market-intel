@@ -41,10 +41,9 @@ def report(pairs, n_unclear=0, n_no_conf=0):
 
 
 def main():
-    import psycopg
-    from dotenv import dotenv_values
-    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
-    with psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"]) as conn, conn.cursor() as cur:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from db import connect
+    with connect() as conn, conn.cursor() as cur:
         cur.execute("select confidence, outcome from ai_calls_log where outcome in ('correct','incorrect','unclear')")
         rows = cur.fetchall()
     pairs = [(c / 100.0, 1 if o == "correct" else 0) for c, o in rows if c is not None and o in ("correct", "incorrect")]

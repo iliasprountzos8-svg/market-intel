@@ -20,12 +20,12 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-import psycopg
-from dotenv import dotenv_values
 
 sys.path.insert(0, str(Path(__file__).parent))
 import lab_data as ld  # noqa: E402
 import lab_wf  # noqa: E402
+sys.path.insert(0, str(Path(__file__).parent.parent / "analysis"))
+from db import connect  # noqa: E402
 
 warnings.filterwarnings("ignore")
 ROOT = ld.ROOT
@@ -38,11 +38,6 @@ create table if not exists lab_positions (book text, side text, symbol text, sig
   ret_pct real, spy_ret_pct real, excess_pct real, net_excess_pct real, horizon int, status text default 'pending', primary key (book, side, symbol, signal_date));
 create table if not exists lab_report (as_of date primary key, report jsonb);
 """
-
-
-def connect():
-    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
-    return psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"])
 
 
 def scores_at(panel, R, latest, ny):
