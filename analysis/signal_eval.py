@@ -31,7 +31,7 @@ import signals  # noqa: E402
 load_dotenv()
 ROOT = Path(__file__).parent.parent
 PRICE_SYM = {"OIL": "CL=F", "GOLD": "GC=F", "USD": "DX-Y.NYB", "MARKET": "^GSPC", "RATES": "^TNX"}
-MODELS = ("lex", "finbert", "ens", "old")
+MODELS = ("lex", "finbert", "ens", "old", "form4")
 
 
 def spearman(x, y):
