@@ -7,13 +7,12 @@ no elevated privileges. The only actions are two allow-listed jobs (pull data, g
 
 Run with the lab venv (needs psycopg, pandas, pyarrow, yfinance).
 """
-import fcntl
 import hmac
 import json
 import os
 import re
 import sqlite3
-import subprocess
+import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -25,6 +24,9 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 import psycopg
 from psycopg.rows import dict_row
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from joblock import is_running as _is_running, start_job as _start_job  # noqa: E402
 
 HOME = Path.home()
 MI = HOME / "market-intel"
@@ -156,25 +158,11 @@ def quotes():
 
 # ---------------------------------------------------------------- job control (allow-listed)
 def is_running(job):
-    try:
-        f = open(LOCKS[job], "a+")
-    except OSError:
-        return False
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(f, fcntl.LOCK_UN)
-        return False
-    except OSError:
-        return True
-    finally:
-        f.close()
+    return _is_running(LOCKS[job])
 
 
 def start_job(job):
-    if is_running(job):
-        return "already running"
-    subprocess.Popen(JOBS[job], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True, cwd=str(MI))
-    return "started"
+    return _start_job(JOBS[job], LOCKS[job], MI)
 
 
 # ---------------------------------------------------------------- API handlers

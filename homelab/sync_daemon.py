@@ -13,7 +13,6 @@ talking, outbound only:
 Only two command kinds exist and both map to allow-listed local scripts, with rate limits.
 Missing remote tables/columns (migration 005 not yet applied) are tolerated: it logs and keeps going.
 """
-import fcntl
 import json
 import os
 import re
@@ -31,6 +30,9 @@ import psycopg
 from dotenv import dotenv_values
 from psycopg.rows import dict_row
 from supabase import create_client
+
+sys.path.insert(0, str(Path(__file__).parent))
+from joblock import is_running as _is_running, start_job as _start_job  # noqa: E402
 
 MI = Path(__file__).parent
 LOGS = MI / "logs"
@@ -97,18 +99,7 @@ def rd(p):
 
 
 def running(name):
-    try:
-        f = open(LOCKS[name], "a+")
-    except OSError:
-        return False
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(f, fcntl.LOCK_UN)
-        return False
-    except OSError:
-        return True
-    finally:
-        f.close()
+    return _is_running(LOCKS[name])
 
 
 class Remote:
