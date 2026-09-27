@@ -13,7 +13,12 @@
   body { margin: 0; background: #0f1216; color: #e8eaed; font: 16px/1.4 -apple-system, system-ui, sans-serif;
          display: flex; flex-direction: column; align-items: center; padding: 24px 16px; min-height: 100vh; box-sizing: border-box; }
   h1 { font-size: 18px; font-weight: 600; margin: 0 0 20px; letter-spacing: 0.02em; }
-  video { width: 100%; max-width: 480px; background: #000; border-radius: 8px; aspect-ratio: 4/3; }
+  .video-wrap { position: relative; width: 100%; max-width: 480px; }
+  video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 4/3; display: block; }
+  .tap-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+                 background: rgba(0,0,0,0.55); border-radius: 8px; border: none; color: #e8eaed;
+                 font-size: 16px; font-weight: 600; cursor: pointer; }
+  .tap-overlay.show { display: flex; }
   .status { margin: 16px 0; font-size: 14px; color: #9aa0a6; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
   .dot.on { background: #34d058; }
@@ -34,7 +39,10 @@
 </head>
 <body>
   <h1>Home Camera</h1>
-  <video id="v" playsinline muted controls></video>
+  <div class="video-wrap">
+    <video id="v" playsinline muted controls></video>
+    <button id="tapOverlay" class="tap-overlay" type="button">Tap to view</button>
+  </div>
   <div class="status"><span id="dot" class="dot off"></span><span id="statusText">checking...</span></div>
   <div class="row">
     <button id="toggle" disabled>...</button>
@@ -58,6 +66,7 @@ const toggle = document.getElementById("toggle");
 const snapBtn = document.getElementById("snap");
 const snapPreview = document.getElementById("snapPreview");
 const sessionList = document.getElementById("sessionList");
+const tapOverlay = document.getElementById("tapOverlay");
 // Same-origin proxy (camera_app.py forwards to mediamtx server-side) -- avoids a cross-origin
 // XHR to mediamtx's own port, which breaks its cookie-based session auth in every real browser.
 // master.m3u8 lists both hi/lo renditions so hls.js/native HLS auto-switch on a bad connection.
@@ -65,16 +74,31 @@ const streamUrl = `/${TOKEN}/stream/master.m3u8`;
 let hls = null;
 let isOn = false;
 
+// Browsers only allow autoplay (even muted) reliably when play() is called as an immediate,
+// direct result of a user gesture -- by the time attachStream() runs (after a status poll and a
+// setTimeout), that gesture context is long gone in most browsers, so play() silently gets
+// rejected: the toggle correctly says "Live" but the video never appears. tryPlay() shows a
+// "Tap to view" overlay whenever that happens, which is a genuine click and is guaranteed to work.
+function tryPlay() {
+  video.muted = true;  // set the IDL property explicitly, not just the HTML attribute (Safari)
+  video.play().then(() => tapOverlay.classList.remove("show"))
+              .catch(() => tapOverlay.classList.add("show"));
+}
+
 function attachStream() {
   if (hls) { hls.destroy(); hls = null; }
-  if (video.canPlayType("application/vnd.apple.mpegurl")) {
-    video.src = streamUrl;
-    video.play().catch(() => {});
-  } else if (window.Hls && Hls.isSupported()) {
+  // hls.js first, native <video src> only as a fallback: some Chromium builds report "maybe" for
+  // canPlayType("application/vnd.apple.mpegurl") without actually being able to demux HLS (fails
+  // with DEMUXER_ERROR_COULD_NOT_PARSE) -- checking Hls.isSupported() first avoids that trap and
+  // matches hls.js's own recommended detection order.
+  if (window.Hls && Hls.isSupported()) {
     hls = new Hls({ liveSyncDurationCount: 2 });
     hls.loadSource(streamUrl);
     hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+    hls.on(Hls.Events.MANIFEST_PARSED, tryPlay);
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = streamUrl;
+    tryPlay();
   }
 }
 
@@ -82,7 +106,10 @@ function detachStream() {
   if (hls) { hls.destroy(); hls = null; }
   video.removeAttribute("src");
   video.load();
+  tapOverlay.classList.remove("show");
 }
+
+tapOverlay.addEventListener("click", tryPlay);
 
 function fmtTime(iso) {
   if (!iso) return "--";
