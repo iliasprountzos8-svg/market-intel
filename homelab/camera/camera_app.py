@@ -5,9 +5,10 @@ from it entirely (own token, own port, own page) since this is a more sensitive 
 deliberately kept separate rather than folded into the market-intel dashboard.
 
 No auto-stop by design (explicit choice): instead, a background thread sends a periodic ntfy
-reminder while the camera is live, so it can never be silently forgotten.
+reminder while the camera is live, so it can never be silently forgotten. No motion detection,
+no recording -- live-view only, also by explicit choice (see homelab/camera/README.md).
 
-Run with: python3 camera_app.py   (needs only the stdlib + curl on PATH for ntfy)
+Run with: python3 camera_app.py   (needs only the stdlib + curl/ffmpeg on PATH)
 """
 import base64
 import hmac
@@ -19,11 +20,11 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+import urllib.error
+import urllib.request
 
 # joblock.py sits next to camera_app.py in the deployed layout (~/services/camera/) and one
 # level up in the repo layout (homelab/joblock.py, shared with hq_app.py/sync_daemon.py) -- try both.
@@ -36,6 +37,8 @@ TOKEN = (HERE / ".control-token").read_text().strip()
 BIND = ("100.83.128.73", 8096)
 LOCK = "/tmp/mi-camera.lock"
 PIDFILE = Path("/tmp/mi-camera.pid")
+SESSIONS_LOG = HERE / "sessions.jsonl"
+ACCESS_LOG = HERE / "access.log"
 # Same dual-location story as joblock.py above: next to this file when deployed, homelab/bin/
 # in the repo checkout.
 CAM_SCRIPT = str(HERE / "homelab-camera.sh") if (HERE / "homelab-camera.sh").exists() \
@@ -43,6 +46,7 @@ CAM_SCRIPT = str(HERE / "homelab-camera.sh") if (HERE / "homelab-camera.sh").exi
 NTFY_TOPIC_FILE = Path("/home/ilias/services/ntfy/topic.txt")
 NTFY_URL = "http://100.83.128.73:8090"
 REMINDER_EVERY_S = 20 * 60
+VIDEO_DEVICE = "/dev/video0"
 
 # mediamtx serves HLS on a different port (8888), which makes it a different browser origin from
 # this app (8096): hls.js's cross-origin XHR then can't carry mediamtx's cookie-based session auth,
@@ -51,15 +55,43 @@ REMINDER_EVERY_S = 20 * 60
 # auth redirect, keep the cookie for subsequent segment requests).
 # mediamtx's hlsAddress is bound to the Tailscale IP specifically (not 127.0.0.1), so the proxy
 # has to reach it there too even though both processes run on the same host.
-_STREAM_BASE = f"http://{BIND[0]}:8888/cam/"
+_MEDIAMTX_HOST = f"http://{BIND[0]}:8888"
 _BASIC_AUTH = base64.b64encode(b"viewer:" + TOKEN.encode()).decode()
 _cookiejar = http.cookiejar.CookieJar()
 _opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_cookiejar))
 
+# Two renditions published by homelab-camera.sh (see its comments): "hi" for good connections,
+# "lo" for cellular/weak links. hls.js and native HLS both auto-switch from a master playlist
+# based on measured bandwidth -- no manual quality picker needed on the phone.
+#
+# mediamtx's own /cam_hi/index.m3u8 (etc.) is NOT a flat media playlist -- it's itself a
+# single-variant master containing one #EXT-X-STREAM-INF pointing at the real media playlist
+# (e.g. "video1_stream.m3u8?session=..."), with a session id that changes per request. A master
+# playlist's variants must point directly at real media playlists, not at other master playlists,
+# so a hand-written master listing "hi/index.m3u8"/"lo/index.m3u8" is invalid HLS that every
+# player silently chokes on. build_master() resolves one level through mediamtx's own playlist for
+# both renditions, on every request (the session id isn't stable), and rewrites each real media
+# playlist's URI to route back through this app's stream/hi/ or stream/lo/ proxy prefix.
+def build_master():
+    variants = []
+    for label, mediamtx_path in (("hi", "cam_hi"), ("lo", "cam_lo")):
+        code, _, body = proxy_stream(mediamtx_path, "index.m3u8")
+        if code != 200:
+            continue
+        lines = body.decode().splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("#EXT-X-STREAM-INF:") and i + 1 < len(lines):
+                variants.append(f"{line}\n{label}/{lines[i + 1]}\n")
+                break
+    if not variants:
+        return None
+    return ("#EXTM3U\n" + "".join(variants)).encode()
 
-def proxy_stream(path_and_query: str):
+
+def proxy_stream(mediamtx_path: str, path_and_query: str):
     """Fetch one HLS file (playlist or segment) from mediamtx and return (status, content_type, body)."""
-    req = urllib.request.Request(_STREAM_BASE + path_and_query, headers={"Authorization": f"Basic {_BASIC_AUTH}"})
+    req = urllib.request.Request(f"{_MEDIAMTX_HOST}/{mediamtx_path}/{path_and_query}",
+                                  headers={"Authorization": f"Basic {_BASIC_AUTH}"})
     try:
         with _opener.open(req, timeout=10) as resp:
             return 200, resp.headers.get("Content-Type", "application/octet-stream"), resp.read()
@@ -104,6 +136,63 @@ def stop_camera():
         return "could not find process to stop (may have already exited)"
 
 
+def take_snapshot():
+    """One JPEG frame, right now. If the camera is already streaming, grab it from the live
+    rendition (the device is exclusively held by that ffmpeg process, so a second -f v4l2 open
+    would fail); otherwise do a quick one-shot open of the device itself."""
+    if camera_on():
+        # mediamtx enforces the same read auth on RTSP as HLS -- needs the viewer credentials too.
+        rtsp_url = f"rtsp://viewer:{TOKEN}@127.0.0.1:8554/cam_hi"
+        cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp",
+               "-i", rtsp_url, "-frames:v", "1", "-f", "image2", "pipe:1"]
+    else:
+        cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "v4l2", "-input_format", "mjpeg",
+               "-video_size", "640x480", "-i", VIDEO_DEVICE, "-frames:v", "1", "-f", "image2", "pipe:1"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=8)
+        if result.returncode == 0 and result.stdout:
+            return result.stdout
+    except subprocess.TimeoutExpired:
+        pass
+    return None
+
+
+def log_access(remote_addr, path, ok):
+    """Append every request's auth outcome -- cheap brute-force visibility. The token has ~144
+    bits of entropy so guessing it is not a realistic risk, but a growing pile of "denied" lines
+    from an unexpected address is worth knowing about regardless."""
+    try:
+        with open(ACCESS_LOG, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {remote_addr} {'OK' if ok else 'DENIED'} {path}\n")
+    except OSError:
+        pass
+
+
+def read_sessions(limit=20):
+    """Pair up on/off lines from the session log into (start, end, duration_s) records, most
+    recent first. An unmatched trailing "on" (camera currently live, or killed uncleanly) shows
+    as an open-ended entry rather than being dropped."""
+    if not SESSIONS_LOG.exists():
+        return []
+    lines = SESSIONS_LOG.read_text().splitlines()[-500:]
+    events = []
+    for line in lines:
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    sessions, pending_on = [], None
+    for e in events:
+        if e.get("event") == "on":
+            pending_on = e.get("ts")
+        elif e.get("event") == "off" and pending_on:
+            sessions.append({"start": pending_on, "end": e.get("ts")})
+            pending_on = None
+    if pending_on:
+        sessions.append({"start": pending_on, "end": None})
+    return list(reversed(sessions))[:limit]
+
+
 def reminder_loop():
     """While the camera is on, nudge every REMINDER_EVERY_S so it's never silently forgotten
     (there is no auto-stop by design -- this is the safety net instead). last_reminder is seeded
@@ -132,6 +221,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(body)
 
@@ -140,7 +230,9 @@ class H(BaseHTTPRequestHandler):
         prefix = "/" + TOKEN + "/"
         if u.path == "/health":
             return "health", ""
-        if len(u.path) >= len(prefix) and hmac.compare_digest(u.path[:len(prefix)], prefix):
+        ok = len(u.path) >= len(prefix) and hmac.compare_digest(u.path[:len(prefix)], prefix)
+        log_access(self.client_address[0], u.path, ok)
+        if ok:
             return "ok", u.path[len(prefix):]
         return None, None
 
@@ -155,13 +247,30 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, html, "text/html; charset=utf-8")
         if rest == "hls.js":
             return self._send(200, (HERE / "hls.js").read_bytes(), "application/javascript")
+        if rest == "manifest.json":
+            manifest = {"name": "Home Camera", "short_name": "Camera", "start_url": "./",
+                        "display": "standalone", "background_color": "#0f1216", "theme_color": "#0f1216"}
+            return self._send(200, json.dumps(manifest).encode(), "application/manifest+json")
         if rest == "api/status":
             return self._send(200, json.dumps({"on": camera_on()}).encode(), "application/json")
-        if rest.startswith("stream/"):
-            path_and_query = rest[len("stream/"):]
-            if self.path.count("?"):
+        if rest == "api/sessions":
+            return self._send(200, json.dumps(read_sessions()).encode(), "application/json")
+        if rest == "api/snapshot.jpg":
+            jpg = take_snapshot()
+            if jpg is None:
+                return self._send(503, b"snapshot failed (camera busy or unavailable)")
+            return self._send(200, jpg, "image/jpeg")
+        if rest == "stream/master.m3u8":
+            master = build_master()
+            if master is None:
+                return self._send(503, b"camera is off or not yet publishing")
+            return self._send(200, master, "application/vnd.apple.mpegurl")
+        if rest.startswith("stream/hi/") or rest.startswith("stream/lo/"):
+            rendition = "cam_hi" if rest.startswith("stream/hi/") else "cam_lo"
+            path_and_query = rest.split("/", 2)[2]
+            if "?" in self.path:
                 path_and_query += "?" + self.path.split("?", 1)[1]
-            code, ctype, body = proxy_stream(path_and_query)
+            code, ctype, body = proxy_stream(rendition, path_and_query)
             return self._send(code, body, ctype)
         self._send(404)
 
