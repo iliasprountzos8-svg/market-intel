@@ -300,7 +300,7 @@ def main():
     p.add_argument("--call", required=True, choices=["bullish", "bearish", "neutral"])
     p.add_argument("--rationale")
     p.add_argument("--digest-id")
-    p.add_argument("--confidence", type=int, help="0-100 confidence score")
+    p.add_argument("--confidence", type=int, required=True, help="0-100 confidence score (required: a call without one can't be calibration-scored)")
     p.add_argument("--horizon-days", type=int, default=5, help="calendar days until the call is scored (5=short, 20=medium)")
     p.add_argument("--symbol", help="explicit price symbol (e.g. NVDA, ^TNX, VWCE.DE); resolved from --ticker if omitted")
     p.add_argument("--invalidation", help="what would prove this call wrong")
