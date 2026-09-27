@@ -21,5 +21,10 @@
 - Patch running bash scripts via temp file + atomic replace.
 
 ## Token-saving conventions
-- Prefer scripts and timers over repeated manual checks. Use Sonnet; Opus only for hard design.
-- One task per session, commit at the end, then start fresh.
+- Prefer scripts and timers over repeated manual checks. Use Sonnet; Opus only for hard design; Haiku for small mechanical tasks (renames, simple greps, formatting, log summarizing) it can handle alone.
+- One task per session, commit at the end, then `/clear`/start fresh. In a 100-message session, ~98% of tokens go to re-reading old messages, not new output — long sessions are the single biggest cost driver. Never continue an old session into an unrelated task.
+- Plan mode first for any real (multi-file or risky) task, so the expensive part (exploration/design) happens once before edits start, not repeatedly across retries.
+- Reference exact files/paths/line numbers instead of describing an area to search — avoids broad Glob/Grep/Explore sweeps.
+- Batch independent requests into one message/one session instead of one message per step.
+- For repeated homelab checks (ports, service status, logs), use `ssh` one-liners or a script directly instead of spinning up a session per check.
+- Keep this file short and current — it's read every session; stale bulk here costs tokens forever.
