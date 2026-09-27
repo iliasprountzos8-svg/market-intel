@@ -79,6 +79,19 @@ if [ "$(cat "$ST/boot_id" 2>/dev/null)" != "$BOOT" ]; then
 fi
 [ "$(cut -d. -f1 /proc/uptime)" -lt 600 ] && exit 0
 
+# ---- network: IPv4 default route present? (wifi can keep an IPv6-only link after a DHCP
+# hiccup, which looks "up" but breaks every outbound call). Self-heal via dhcpcd rebind first;
+# alert only if that doesn't restore it. Delivered over Tailscale, which doesn't need this route.
+if ! ip route show default | grep -q .; then
+  for ifc in wlo1 eno1; do
+    ip link show "$ifc" 2>/dev/null | grep -q "state UP" && sudo -n dhcpcd -4 --rebind "$ifc" >/dev/null 2>&1
+  done
+  sleep 3
+fi
+if ip route show default | grep -q .; then ok net_down
+else alert net_down urgent "No IPv4 route on homelab" "wlo1/eno1 have no default IPv4 route; DHCP rebind attempted and failed. Check: ip -4 addr; nmcli device status" 1800
+fi
+
 # ---- full cycle: hung / stale ----
 read -r kind ts _ < "$MI/logs/cycle-status.txt" 2>/dev/null || { kind=none; ts=""; }
 age=$(age_of "$ts")
