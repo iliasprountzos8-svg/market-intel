@@ -1,0 +1,15 @@
+[Unit]
+Description=mediamtx (RTSP-in/HLS-out relay for the home camera feed; idle until ffmpeg publishes)
+After=network-online.target tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+User=ilias
+WorkingDirectory=/opt/mediamtx
+ExecStart=/opt/mediamtx/mediamtx /opt/mediamtx/mediamtx.yml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

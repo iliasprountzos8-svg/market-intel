@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Home Camera</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0f1216; color: #e8eaed; font: 16px/1.4 -apple-system, system-ui, sans-serif;
+         display: flex; flex-direction: column; align-items: center; padding: 24px 16px; min-height: 100vh; box-sizing: border-box; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 20px; letter-spacing: 0.02em; }
+  video { width: 100%; max-width: 480px; background: #000; border-radius: 8px; aspect-ratio: 4/3; }
+  .status { margin: 16px 0; font-size: 14px; color: #9aa0a6; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.on { background: #34d058; }
+  .dot.off { background: #5f6368; }
+  button { font-size: 17px; font-weight: 600; padding: 14px 32px; border-radius: 999px; border: none;
+           margin-top: 12px; min-width: 200px; }
+  button.start { background: #34d058; color: #0f1216; }
+  button.stop { background: #f85149; color: #0f1216; }
+  button:disabled { opacity: 0.5; }
+  .hint { margin-top: 20px; font-size: 12px; color: #5f6368; text-align: center; max-width: 320px; }
+</style>
+</head>
+<body>
+  <h1>Home Camera</h1>
+  <video id="v" playsinline muted controls></video>
+  <div class="status"><span id="dot" class="dot off"></span><span id="statusText">checking...</span></div>
+  <button id="toggle" disabled>...</button>
+  <p class="hint">No auto-stop. Turn it off yourself when you're done -- you'll get a reminder ping if it's left on.</p>
+
+<script src="/__TOKEN__/hls.js"></script>
+<script>
+const TOKEN = "__TOKEN__";
+const video = document.getElementById("v");
+const dot = document.getElementById("dot");
+const statusText = document.getElementById("statusText");
+const toggle = document.getElementById("toggle");
+// Same-origin proxy (camera_app.py forwards to mediamtx server-side) -- avoids a cross-origin
+// XHR to mediamtx's own port, which breaks its cookie-based session auth in every real browser.
+const streamUrl = `/${TOKEN}/stream/index.m3u8`;
+let hls = null;
+let isOn = false;
+
+function attachStream() {
+  if (hls) { hls.destroy(); hls = null; }
+  if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = streamUrl;
+    video.play().catch(() => {});
+  } else if (window.Hls && Hls.isSupported()) {
+    hls = new Hls({ liveSyncDurationCount: 2 });
+    hls.loadSource(streamUrl);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+  }
+}
+
+function detachStream() {
+  if (hls) { hls.destroy(); hls = null; }
+  video.removeAttribute("src");
+  video.load();
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch(`/${TOKEN}/api/status`);
+    const j = await r.json();
+    isOn = j.on;
+    dot.className = "dot " + (isOn ? "on" : "off");
+    statusText.textContent = isOn ? "Live" : "Off";
+    toggle.textContent = isOn ? "Turn off" : "Turn on";
+    toggle.className = isOn ? "stop" : "start";
+    toggle.disabled = false;
+    if (isOn && !hls && !video.src) setTimeout(attachStream, 1500);  // give ffmpeg a moment to start publishing
+    if (!isOn) detachStream();
+  } catch (e) {
+    statusText.textContent = "unreachable";
+  }
+}
+
+toggle.addEventListener("click", async () => {
+  toggle.disabled = true;
+  toggle.textContent = "...";
+  await fetch(`/${TOKEN}/api/${isOn ? "stop" : "start"}`, { method: "POST" });
+  setTimeout(refreshStatus, 800);
+});
+
+refreshStatus();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>

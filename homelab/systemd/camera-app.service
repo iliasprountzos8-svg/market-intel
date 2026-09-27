@@ -1,0 +1,15 @@
+[Unit]
+Description=Camera control app (phone toggle for the home webcam live view, Tailscale-only)
+After=network-online.target tailscaled.service mediamtx.service
+Wants=tailscaled.service
+
+[Service]
+User=ilias
+WorkingDirectory=/home/ilias/services/camera
+ExecStart=/usr/bin/python3 /home/ilias/services/camera/camera_app.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
