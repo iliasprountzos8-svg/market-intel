@@ -13,6 +13,10 @@
   body { margin: 0; background: #0f1216; color: #e8eaed; font: 16px/1.4 -apple-system, system-ui, sans-serif;
          display: flex; flex-direction: column; align-items: center; padding: 24px 16px; min-height: 100vh; box-sizing: border-box; }
   h1 { font-size: 18px; font-weight: 600; margin: 0 0 20px; letter-spacing: 0.02em; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab { padding: 8px 18px; border-radius: 999px; background: #1b1f26; color: #9aa0a6; font-size: 14px;
+         font-weight: 600; border: none; cursor: pointer; }
+  .tab.active { background: #2a2f36; color: #e8eaed; }
   .video-wrap { position: relative; width: 100%; max-width: 480px; }
   video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 4/3; display: block; }
   .tap-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
@@ -39,6 +43,7 @@
 </head>
 <body>
   <h1>Home Camera</h1>
+  <div class="tabs" id="tabs"></div>
   <div class="video-wrap">
     <video id="v" playsinline muted controls></video>
     <button id="tapOverlay" class="tap-overlay" type="button">Tap to view</button>
@@ -51,7 +56,7 @@
   <img id="snapPreview" class="snap-preview">
   <p class="hint">No auto-stop. Turn it off yourself when you're done -- you'll get a reminder ping if it's left on.</p>
 
-  <div class="sessions">
+  <div class="sessions" id="sessionsBox">
     <h2>Recent sessions</h2>
     <ul id="sessionList"><li>loading...</li></ul>
   </div>
@@ -59,6 +64,29 @@
 <script src="/__TOKEN__/hls.js"></script>
 <script>
 const TOKEN = "__TOKEN__";
+const VICTUS_ENDPOINT = "__VICTUS_ENDPOINT__";  // e.g. "http://100.114.19.15:8097/<token>/", or "" if not set up
+
+// Two independent capture sources, one relay: mediamtx (on the homelab) holds both streams, so
+// viewing either is just a different path proxied through this same app. Only start/stop for
+// "victus" goes to a different origin (Victus's own tiny agent) -- there's no reason for the two
+// servers to trust each other, so the phone's own browser is the bridge, exactly as far as it
+// needs to be and no further. Snapshot/session-log stay homelab-only for now (Victus is a smaller,
+// on-demand-only agent without those extras).
+const SOURCES = {
+  cam: {
+    label: "Homelab", streamUrl: `/${TOKEN}/stream/master.m3u8`,
+    statusUrl: `/${TOKEN}/api/status`, startUrl: `/${TOKEN}/api/start`, stopUrl: `/${TOKEN}/api/stop`,
+    hasExtras: true,
+  },
+  ...(VICTUS_ENDPOINT ? {
+    victus: {
+      label: "Victus", streamUrl: `/${TOKEN}/stream/victus/master.m3u8`,
+      statusUrl: `${VICTUS_ENDPOINT}api/status`, startUrl: `${VICTUS_ENDPOINT}api/start`, stopUrl: `${VICTUS_ENDPOINT}api/stop`,
+      hasExtras: false,
+    },
+  } : {}),
+};
+
 const video = document.getElementById("v");
 const dot = document.getElementById("dot");
 const statusText = document.getElementById("statusText");
@@ -66,13 +94,31 @@ const toggle = document.getElementById("toggle");
 const snapBtn = document.getElementById("snap");
 const snapPreview = document.getElementById("snapPreview");
 const sessionList = document.getElementById("sessionList");
+const sessionsBox = document.getElementById("sessionsBox");
 const tapOverlay = document.getElementById("tapOverlay");
-// Same-origin proxy (camera_app.py forwards to mediamtx server-side) -- avoids a cross-origin
-// XHR to mediamtx's own port, which breaks its cookie-based session auth in every real browser.
-// master.m3u8 lists both hi/lo renditions so hls.js/native HLS auto-switch on a bad connection.
-const streamUrl = `/${TOKEN}/stream/master.m3u8`;
+const tabsEl = document.getElementById("tabs");
+
 let hls = null;
 let isOn = false;
+let current = "cam";
+
+function renderTabs() {
+  tabsEl.innerHTML = Object.entries(SOURCES).map(([key, s]) =>
+    `<button class="tab ${key === current ? "active" : ""}" data-key="${key}">${s.label}</button>`).join("");
+  tabsEl.querySelectorAll(".tab").forEach(btn => btn.addEventListener("click", () => switchSource(btn.dataset.key)));
+}
+
+function switchSource(key) {
+  if (key === current) return;
+  current = key;
+  renderTabs();
+  detachStream();
+  snapBtn.style.display = SOURCES[key].hasExtras ? "" : "none";
+  sessionsBox.style.display = SOURCES[key].hasExtras ? "" : "none";
+  statusText.textContent = "checking...";
+  refreshStatus();
+  if (SOURCES[key].hasExtras) refreshSessions();
+}
 
 // Browsers only allow autoplay (even muted) reliably when play() is called as an immediate,
 // direct result of a user gesture -- by the time attachStream() runs (after a status poll and a
@@ -87,6 +133,7 @@ function tryPlay() {
 
 function attachStream() {
   if (hls) { hls.destroy(); hls = null; }
+  const streamUrl = SOURCES[current].streamUrl;
   // hls.js first, native <video src> only as a fallback: some Chromium builds report "maybe" for
   // canPlayType("application/vnd.apple.mpegurl") without actually being able to demux HLS (fails
   // with DEMUXER_ERROR_COULD_NOT_PARSE) -- checking Hls.isSupported() first avoids that trap and
@@ -124,6 +171,7 @@ function fmtDuration(startIso, endIso) {
 }
 
 async function refreshSessions() {
+  if (!SOURCES[current].hasExtras) return;
   try {
     const r = await fetch(`/${TOKEN}/api/sessions`);
     const list = await r.json();
@@ -136,26 +184,28 @@ async function refreshSessions() {
 }
 
 async function refreshStatus() {
+  const key = current;
   try {
-    const r = await fetch(`/${TOKEN}/api/status`);
+    const r = await fetch(SOURCES[key].statusUrl);
     const j = await r.json();
+    if (key !== current) return;  // switched tabs while this was in flight
     isOn = j.on;
     dot.className = "dot " + (isOn ? "on" : "off");
     statusText.textContent = isOn ? "Live" : "Off";
     toggle.textContent = isOn ? "Turn off" : "Turn on";
     toggle.className = isOn ? "stop" : "start";
     toggle.disabled = false;
-    if (isOn && !hls && !video.src) setTimeout(attachStream, 1500);  // give ffmpeg a moment to start publishing
+    if (isOn && !hls && !video.src) setTimeout(() => { if (key === current) attachStream(); }, 1500);
     if (!isOn) detachStream();
   } catch (e) {
-    statusText.textContent = "unreachable";
+    if (key === current) statusText.textContent = "unreachable";
   }
 }
 
 toggle.addEventListener("click", async () => {
   toggle.disabled = true;
   toggle.textContent = "...";
-  await fetch(`/${TOKEN}/api/${isOn ? "stop" : "start"}`, { method: "POST" });
+  await fetch(isOn ? SOURCES[current].stopUrl : SOURCES[current].startUrl, { method: "POST" }).catch(() => {});
   setTimeout(() => { refreshStatus(); refreshSessions(); }, 800);
 });
 
@@ -176,15 +226,21 @@ snapBtn.addEventListener("click", async () => {
 
 // One-tap quick action for a home-screen Shortcut/bookmark: /TOKEN/?go=on or ?go=off skips the
 // button tap and returns to a clean URL, so a Siri Shortcut ("Open URL") can toggle in one step.
+// Only applies to the default (homelab) source -- add ?src=victus&go=on for the other one.
 (async function quickAction() {
   const params = new URLSearchParams(location.search);
   const go = params.get("go");
+  const src = params.get("src");
+  if (src && SOURCES[src]) current = src;
   if (go === "on" || go === "off") {
-    await fetch(`/${TOKEN}/api/${go === "on" ? "start" : "stop"}`, { method: "POST" });
+    await fetch(go === "on" ? SOURCES[current].startUrl : SOURCES[current].stopUrl, { method: "POST" }).catch(() => {});
     history.replaceState({}, "", location.pathname);
   }
 })();
 
+renderTabs();
+snapBtn.style.display = SOURCES[current].hasExtras ? "" : "none";
+sessionsBox.style.display = SOURCES[current].hasExtras ? "" : "none";
 refreshStatus();
 refreshSessions();
 setInterval(refreshStatus, 5000);

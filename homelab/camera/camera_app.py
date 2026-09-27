@@ -34,6 +34,11 @@ from joblock import is_running as _is_running  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 TOKEN = (HERE / ".control-token").read_text().strip()
+# Victus's own control agent has its own token and origin entirely (see ../victus-camera/); this
+# is just page config for the user's browser to call it directly, not a trust relationship
+# between the two servers. Blank if not set up -- the page then just hides the Victus tab.
+VICTUS_ENDPOINT_FILE = HERE / "victus-endpoint.txt"
+VICTUS_ENDPOINT = VICTUS_ENDPOINT_FILE.read_text().strip() if VICTUS_ENDPOINT_FILE.exists() else ""
 BIND = ("100.83.128.73", 8096)
 LOCK = "/tmp/mi-camera.lock"
 PIDFILE = Path("/tmp/mi-camera.pid")
@@ -72,9 +77,19 @@ _opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_cookie
 # player silently chokes on. build_master() resolves one level through mediamtx's own playlist for
 # both renditions, on every request (the session id isn't stable), and rewrites each real media
 # playlist's URI to route back through this app's stream/hi/ or stream/lo/ proxy prefix.
-def build_master():
+# Victus (a second, separate laptop, on-demand only) publishes into this SAME mediamtx as its
+# own "victus_hi"/"victus_lo" paths -- see ../victus-camera/README.md. Viewing it needs nothing
+# Victus-specific: mediamtx already holds the stream centrally once it's publishing, so this app
+# just proxies a different path prefix. Starting/stopping capture on Victus is the one thing that
+# does need to reach Victus directly -- the phone's browser does that itself (see index.html),
+# not this app, since there's no reason for the two machines to trust each other server-to-server.
+SOURCES = {"cam": ("cam_hi", "cam_lo"), "victus": ("victus_hi", "victus_lo")}
+
+
+def build_master(source="cam"):
+    hi_path, lo_path = SOURCES.get(source, SOURCES["cam"])
     variants = []
-    for label, mediamtx_path in (("hi", "cam_hi"), ("lo", "cam_lo")):
+    for label, mediamtx_path in (("hi", hi_path), ("lo", lo_path)):
         code, _, body = proxy_stream(mediamtx_path, "index.m3u8")
         if code != 200:
             continue
@@ -243,7 +258,8 @@ class H(BaseHTTPRequestHandler):
         if kind != "ok":
             return self._send(404)
         if rest in ("", "index.html"):
-            html = (HERE / "index.html").read_bytes().replace(b"__TOKEN__", TOKEN.encode())
+            html = (HERE / "index.html").read_bytes().replace(b"__TOKEN__", TOKEN.encode()) \
+                .replace(b"__VICTUS_ENDPOINT__", VICTUS_ENDPOINT.encode())
             return self._send(200, html, "text/html; charset=utf-8")
         if rest == "hls.js":
             return self._send(200, (HERE / "hls.js").read_bytes(), "application/javascript")
@@ -260,14 +276,19 @@ class H(BaseHTTPRequestHandler):
             if jpg is None:
                 return self._send(503, b"snapshot failed (camera busy or unavailable)")
             return self._send(200, jpg, "image/jpeg")
-        if rest == "stream/master.m3u8":
-            master = build_master()
+        if rest == "stream/master.m3u8" or rest == "stream/victus/master.m3u8":
+            source = "victus" if rest.startswith("stream/victus/") else "cam"
+            master = build_master(source)
             if master is None:
                 return self._send(503, b"camera is off or not yet publishing")
             return self._send(200, master, "application/vnd.apple.mpegurl")
-        if rest.startswith("stream/hi/") or rest.startswith("stream/lo/"):
-            rendition = "cam_hi" if rest.startswith("stream/hi/") else "cam_lo"
-            path_and_query = rest.split("/", 2)[2]
+        if (rest.startswith("stream/hi/") or rest.startswith("stream/lo/")
+                or rest.startswith("stream/victus/hi/") or rest.startswith("stream/victus/lo/")):
+            is_victus = rest.startswith("stream/victus/")
+            tail = rest[len("stream/victus/"):] if is_victus else rest[len("stream/"):]
+            hi_path, lo_path = SOURCES["victus" if is_victus else "cam"]
+            rendition = hi_path if tail.startswith("hi/") else lo_path
+            path_and_query = tail.split("/", 1)[1]
             if "?" in self.path:
                 path_and_query += "?" + self.path.split("?", 1)[1]
             code, ctype, body = proxy_stream(rendition, path_and_query)

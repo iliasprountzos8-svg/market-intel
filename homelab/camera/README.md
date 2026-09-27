@@ -4,6 +4,12 @@ Toggle the laptop's webcam on/off from a phone and watch it live, Tailscale-only
 no motion detection, no auto-stop (all by explicit design choice) -- see camera_app.py's
 docstring for the reasoning.
 
+A second, independent camera source (Victus's own webcam) can publish into this same mediamtx and
+show up as a second tab on the phone page -- see `../victus-camera/README.md`. This app doesn't
+need to know anything Victus-specific to serve it: viewing/proxying/master-playlist logic is
+already source-parameterized (`SOURCES` in camera_app.py), and the phone's browser talks to
+Victus's own tiny agent directly for start/stop.
+
 ## Features
 
 - Live view with adaptive quality (hi/lo HLS renditions, auto-switches on a bad connection)
