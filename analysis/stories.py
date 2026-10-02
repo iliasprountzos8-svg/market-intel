@@ -14,13 +14,20 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+import psycopg
+from dotenv import dotenv_values
+
 sys.path.insert(0, str(Path(__file__).parent))
 import story_logic as sl  # noqa: E402
-from db import connect  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCK_ID = 7461
 _ITEMS = re.compile(r"Items?:\s*([0-9., ]+)")
+
+
+def connect():
+    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
+    return psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"])
 
 
 def load_universe():
@@ -126,6 +133,9 @@ def main(argv=None):
         n_art = len(rows)
         print(f"{n_art} articles -> {len(touched)} touched stories ({n_new} new, {len(touched) - n_new} extended); "
               f"dedupe ratio {n_art / max(len(touched), 1):.2f}")
+        print(f"  dedup matches: {ix.stats['hash']} exact title_hash, {ix.stats['jaccard']} token-Jaccard, "
+              f"{ix.stats['fuzzy_title']} fuzzy-title (>= {sl.FUZZY_TITLE_MIN}) -- fuzzy-title pass caught "
+              f"{ix.stats['fuzzy_title']} extra duplicate(s) this run that exact title_hash alone would have missed")
 
         def story_priority(s):
             ev = ev_by_story.get(s.id) or prev_event.get(s.id) or "other"

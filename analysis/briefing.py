@@ -14,11 +14,15 @@ from pathlib import Path
 
 import re
 
-sys.path.insert(0, str(Path(__file__).parent))
-from db import connect  # noqa: E402
-
 ROOT = Path(__file__).resolve().parent.parent
 HERE = Path(__file__).parent
+
+
+def connect():
+    import psycopg
+    from dotenv import dotenv_values
+    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
+    return psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"])
 
 
 def has_word(text, kw):
@@ -120,7 +124,7 @@ def build():
 def send(text):
     topic = (Path.home() / "services" / "ntfy" / "topic.txt").read_text().strip()
     req = urllib.request.Request(f"http://100.83.128.73:8090/{topic}", data=text[:3500].encode("utf-8"),
-                                 headers={"Title": "Morning brief", "Priority": "default", "Tags": "newspaper"})
+                                 headers={"Title": "Morning brief", "Priority": "high", "Tags": "newspaper"})
     urllib.request.urlopen(req, timeout=15).read()
 
 

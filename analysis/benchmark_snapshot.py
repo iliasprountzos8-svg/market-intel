@@ -189,7 +189,9 @@ def to_markdown(snap):
         lines.append(f"- {se['note']}")
     elif se:
         sig = [k for k, v in se.items() if v.get("p") is not None and v["p"] < 0.05]
-        lines.append(f"- {len(sig)}/{len(se)} tests significant at p<0.05 (~{len(se) * 0.05:.1f} expected by chance)")
+        sig_fdr = [k for k, v in se.items() if v.get("skill_fdr")]
+        lines.append(f"- {len(sig)}/{len(se)} tests significant at p<0.05 (~{len(se) * 0.05:.1f} expected by chance); "
+                      f"{len(sig_fdr)}/{len(se)} survive Benjamini-Hochberg FDR correction at q=0.10 (prefer this figure)")
         for k in sig:
             v = se[k]
             lines.append(f"  - {k}: rho={v['rho']:.3f} p={v['p']:.3f} n={v['n']}")
@@ -206,7 +208,9 @@ def to_markdown(snap):
             if "note" in r:
                 lines.append(f"- {r['name']}: {r['note']}")
             else:
-                lines.append(f"- {r['name']}: IC={r['ic_mean']:.3f} (t={r['ic_t']:.1f}) net={r['spread_net_pct']:+.2f}% skill={r['skill']}")
+                skill_fdr = r.get("skill_fdr")
+                lines.append(f"- {r['name']}: IC={r['ic_mean']:.3f} (t={r['ic_t']:.1f}) net={r['spread_net_pct']:+.2f}% "
+                              f"skill={r['skill']} skill_fdr={skill_fdr if skill_fdr is not None else 'n/a'}")
     else:
         lines.append("- no results data")
     lines.append("")

@@ -21,11 +21,17 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "nlp"))
 import embed_logic as el  # noqa: E402
 import story_logic as sl  # noqa: E402
-from db import connect  # noqa: E402
 
 EMBED_MERGE_COS = 0.78  # frozen after calibrating on eval/pairs_v1.txt; blind test on pairs_v2.txt: precision 94% (33/35), recall 60% (33/55)
 LOCK_ID = 7461          # shared with stories.py so the two never write at once
 BINS = [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 1.01]
+
+
+def connect():
+    import psycopg
+    from dotenv import dotenv_values
+    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
+    return psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"])
 
 
 def load_recent(cur, days):

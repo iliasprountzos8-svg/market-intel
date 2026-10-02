@@ -16,6 +16,7 @@
 - Tests: `python -m unittest discover -s tests` (138 pass, 2 skip locally: need scipy).
 
 ## Gotchas
+- Server is not git: run `python homelab/drift_check.py` before editing deployed files and after any server hotfix (it compares committed repo vs server). Mirror server hotfixes into the repo, then commit.
 - In inline python heredocs, `\b`/`\n` escapes get collapsed (a `\b` became a backspace byte). Use the Edit/Write tools for regexes.
 - `grep -v "^#"` hides output lines starting with '#'.
 - Patch running bash scripts via temp file + atomic replace.

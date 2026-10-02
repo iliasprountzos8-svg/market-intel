@@ -19,15 +19,22 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import psycopg
+from dotenv import dotenv_values
+
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import signals as S  # noqa: E402  (entity extraction, events, clustering, standardisation)
-from db import connect  # noqa: E402
 
 GREEK = re.compile(r"[Α-Ωα-ωά-ώ]")
 HOLD = set(S.HOLDINGS)
 EVENT_PTS = {"guidance": 18, "earnings": 18, "m&a": 15, "filing": 12, "analyst": 10, "legal_reg": 8, "macro": 8, "supply": 8, "product": 4}
 REAL = set(S.UNIVERSE_SYMS) - set(S.MACRO)
+
+
+def connect():
+    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
+    return psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"])
 
 
 def compute(it):

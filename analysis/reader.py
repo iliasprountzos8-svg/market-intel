@@ -8,7 +8,7 @@ relevance and a one-line takeaway. Results go to story_reads. Batching matters: 
     python reader.py                     # read the next batch of top unread stories (respects the daily cap)
     python reader.py --dry-run           # show what would be read and the prompt size, no model call
     python reader.py --eval-set 2        # read the gold sample (title+summary only) for evaluation
-Controls: OFF unless MI_READER=1 (it uses Claude usage); MI_READER_DAILY_MAX (default 60 stories/day); MI_READER_MODEL (default haiku).
+Controls: MI_READER=0 disables; MI_READER_DAILY_MAX (default 60 stories/day); MI_READER_MODEL (default haiku).
 """
 import argparse
 import json
@@ -113,10 +113,11 @@ def eval_set(n, model, batch=18):
 
 
 def run_live(k, model, dry):
-    sys.path.insert(0, str(Path(__file__).parent))
-    from db import connect
+    import psycopg
+    from dotenv import dotenv_values
+    env = dotenv_values(Path.home() / "services" / "marketdb" / ".env")
     daily = int(os.environ.get("MI_READER_DAILY_MAX", "60"))
-    with connect() as conn, conn.cursor() as cur:
+    with psycopg.connect(host="127.0.0.1", port=5433, dbname="marketintel", user="postgres", password=env["POSTGRES_PASSWORD"]) as conn, conn.cursor() as cur:
         cur.execute("select count(*) from story_reads where read_at > date_trunc('day', now())")
         used = cur.fetchone()[0]
         room = max(0, daily - used)

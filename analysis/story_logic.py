@@ -3,6 +3,7 @@
 No I/O and no third-party imports, so it can be unit tested anywhere (see tests/test_story_logic.py).
 The database glue lives in stories.py.
 """
+import difflib
 import hashlib
 import math
 import re
@@ -13,6 +14,8 @@ BACKFILL_HOURS = 24
 CLUSTER_WINDOW_H = 72
 JACCARD_MIN = 0.6
 MIN_OVERLAP = 3
+FUZZY_TITLE_MIN = 0.85  # secondary dedup pass: catches wire-service rewrites/reworded headlines that
+                         # exact title_hash misses and whose token overlap is too thin for JACCARD_MIN
 
 PER_TICKER_SOURCES = {"yahoo finance", "seeking alpha", "nasdaq.com"}
 PRIMARY_HINTS = ("sec edgar", "sec 8-k", "sec ", "federal reserve", "ecb", "european central bank", "bank of england",
@@ -67,6 +70,17 @@ def jaccard(a, b):
     return len(a & b) / len(a | b)
 
 
+def title_similarity(title_a, title_b):
+    """Character-level fuzzy similarity (0..1) between two normalized titles, via difflib's
+    SequenceMatcher. Complementary to title_hash (exact) and wjaccard (token-set): catches
+    wire-service rewrites and lightly reworded headlines that share few/no whole tokens but are
+    still clearly the same sentence (e.g. punctuation/number formatting differences)."""
+    a, b = normalize_title(title_a), normalize_title(title_b)
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
 def is_backfill(published_at, scraped_at, hours=BACKFILL_HOURS):
     """True when we saw the item long after it was published: it is old news to us, not a fresh event."""
     if published_at is None or scraped_at is None:
@@ -83,9 +97,7 @@ def load_names(sp500_json_path):
     """S&P 500 company names (legal suffixes stripped) -> symbol, for headline entity matching. Skips ambiguous or very short names."""
     import json
     names = {}
-    with open(sp500_json_path, encoding="utf-8") as f:
-        sp500 = json.load(f)
-    for x in sp500:
+    for x in json.load(open(sp500_json_path, encoding="utf-8")):
         name = x["name"]
         for _ in range(3):
             name = _NAME_SUFFIX.sub("", name).strip()
@@ -175,6 +187,9 @@ class StoryIndex:
         self.by_hash = defaultdict(list)
         self.inv = defaultdict(set)
         self.next_id = next_id
+        # dedup-method stats for this run, for measuring how much the fuzzy-title pass adds
+        # beyond exact title_hash + token-Jaccard clustering (see stories.py for the printed line).
+        self.stats = {"hash": 0, "jaccard": 0, "fuzzy_title": 0, "new": 0}
 
     def add_existing(self, story):
         self.stories[story.id] = story
@@ -214,8 +229,10 @@ class StoryIndex:
                 s = self.stories[sid]
                 if abs((pub - s.first_pub).total_seconds()) <= CLUSTER_WINDOW_H * 3600:
                     s.add(art, ents)
+                    self.stats["hash"] += 1
                     return sid, False
         best, best_j = None, 0.0
+        candidates = {}  # sid -> Story, gathered once and reused by both the Jaccard and fuzzy-title passes
         atk = set(art.get("tickers") or [])
         if toks:
             counts = Counter(sid for t in toks for sid in self.inv.get(t, ()))
@@ -229,16 +246,33 @@ class StoryIndex:
                     continue  # feeds for different companies: same template, different story
                 if ents and s.ents and not (ents & s.ents):
                     continue  # headlines name different companies: same template, different story
+                candidates[sid] = s
                 j = self.wjaccard(toks, s.tokens)
                 if j > best_j:
                     best, best_j = sid, j
         if best is not None and best_j >= JACCARD_MIN:
             self.stories[best].add(art, ents)
+            self.stats["jaccard"] += 1
             return best, False
+        # Secondary dedup pass, complementary to exact title_hash and token-Jaccard above: catches
+        # wire-service rewrites/reworded headlines whose token overlap is too thin to hit JACCARD_MIN
+        # (e.g. very short or heavily reworded titles), via character-level fuzzy title similarity.
+        # Only checked against the same window/ticker/entity-filtered candidate set gathered above,
+        # so it stays cheap even with tens of thousands of stories.
+        best_fuzzy, best_ratio = None, 0.0
+        for sid, s in candidates.items():
+            r = title_similarity(art["title"], s.title)
+            if r > best_ratio:
+                best_fuzzy, best_ratio = sid, r
+        if best_fuzzy is not None and best_ratio >= FUZZY_TITLE_MIN:
+            self.stories[best_fuzzy].add(art, ents)
+            self.stats["fuzzy_title"] += 1
+            return best_fuzzy, False
         s = Story(self.next_id, art, ents)
         self.next_id += 1
         self.stories[s.id] = s
         self._index(s)
+        self.stats["new"] += 1
         return s.id, True
 
 
