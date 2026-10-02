@@ -79,27 +79,26 @@ def main():
         seen.add(key)
         calls.append((r, created, sym))
 
-    recs, unscorable, pending = [], [], []
-    bench_cache = {}
+    recs, unscorable, pending, views_seen = [], [], [], set()
     for r, created, sym in calls:
         horizon = int(r.get("horizon_days") or scoring.DEFAULT_HORIZON_DAYS)
         if not sym:
             unscorable.append(r.get("ticker_or_theme"))
             continue
-        w = scoring.window_return(sym, created, horizon, r.get("entry_price"))
+        w = scoring.window_return(sym, created, horizon)
         if w is None:
             pending.append(f"{sym}({created.date()})")
             continue
-        v = scoring.verdict(r["call"], w["return_pct"], args.threshold)
+        bench = scoring.window_return(scoring.BENCHMARK, created, horizon) if sym in scoring.STOCKS else None
+        v, basis = scoring.judge(r["call"], sym, w, bench, args.threshold)
+        vk = scoring.view_key(sym, r["call"], w)
+        if vk in views_seen:
+            continue  # same view re-logged against the same window
+        views_seen.add(vk)
         rec = {"symbol": sym, "call": r["call"], "date": created.date().isoformat(), "horizon": horizon,
-               "ret": w["return_pct"], "verdict": v, "confidence": r.get("confidence")}
-        if sym in scoring.STOCKS:
-            key = (created.date(), horizon)
-            if key not in bench_cache:
-                b = scoring.window_return(scoring.BENCHMARK, created, horizon)
-                bench_cache[key] = b["return_pct"] if b else None
-            if bench_cache[key] is not None:
-                rec["excess"] = w["return_pct"] - bench_cache[key]
+               "ret": w["return_pct"], "verdict": v, "basis": basis, "confidence": r.get("confidence")}
+        if bench:
+            rec["excess"] = w["return_pct"] - bench["return_pct"]
         recs.append(rec)
 
     decided = [x for x in recs if x["verdict"] in ("correct", "incorrect")]
@@ -167,7 +166,7 @@ def main():
         req = urllib.request.Request(
             os.environ["NTFY_SERVER"].rstrip("/"),
             data=json.dumps({"topic": os.environ["NTFY_TOPIC"], "title": "Market Intel: weekly track record",
-                             "message": body, "priority": 3, "tags": ["bar_chart"],
+                             "message": body, "priority": 1, "tags": ["bar_chart"],
                              "click": os.environ.get("NTFY_CONTROL_URL", "")}).encode(),
             headers={"Content-Type": "application/json"})
         try:

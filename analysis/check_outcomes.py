@@ -108,20 +108,20 @@ def main():
 
         created = datetime.fromisoformat(c["created_at"].replace("Z", "+00:00"))
         horizon = int(c.get("horizon_days") or scoring.DEFAULT_HORIZON_DAYS)
-        w = scoring.window_return(symbol, created, horizon, c.get("entry_price"))
+        w = scoring.window_return(symbol, created, horizon)
         if w is None:
             skipped += 1  # window still open, or no price data yet: try again next cycle
             continue
 
-        outcome = scoring.verdict(c["call"], w["return_pct"], args.move_threshold)
-        update = {"outcome": outcome, "outcome_checked_at": datetime.now(timezone.utc).isoformat(),
-                  "exit_price": w["exit_price"], "asset_return_pct": round(w["return_pct"], 3),
-                  "resolved_at": datetime.now(timezone.utc).isoformat()}
-        if symbol in scoring.STOCKS:
-            b = scoring.window_return(scoring.BENCHMARK, created, horizon)
-            if b:
-                update["benchmark_return_pct"] = round(b["return_pct"], 3)
-                update["excess_return_pct"] = round(w["return_pct"] - b["return_pct"], 3)
+        bench = scoring.window_return(scoring.BENCHMARK, created, horizon) if symbol in scoring.STOCKS else None
+        outcome, basis = scoring.judge(c["call"], symbol, w, bench, args.move_threshold)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        update = {"outcome": outcome, "outcome_checked_at": now_iso, "resolved_at": now_iso,
+                  "entry_price": round(w["entry_price"], 4), "exit_price": round(w["exit_price"], 4),
+                  "asset_return_pct": round(w["return_pct"], 3), "scoring_version": scoring.SCORING_VERSION}
+        if bench:
+            update["benchmark_return_pct"] = round(bench["return_pct"], 3)
+            update["excess_return_pct"] = round(w["return_pct"] - bench["return_pct"], 3)
         for attempt in range(8):  # drop columns that migration 004 hasn't added yet
             try:
                 client.table("ai_calls_log").update(update).eq("id", c["id"]).execute()
@@ -132,21 +132,28 @@ def main():
                     raise
                 update.pop(bad)
 
-        log.info(f"{c['ticker_or_theme']:30s} called {c['call']:8s} -> {symbol:10s} {horizon}d {w['return_pct']:+.2f}% -> {outcome}")
+        log.info(f"{c['ticker_or_theme']:30s} called {c['call']:8s} -> {symbol:10s} {horizon}d {w['return_pct']:+.2f}% -> {outcome} ({basis})")
         checked += 1
 
-    log.info(f"Checked {checked}, skipped {skipped} (no symbol mapping or no data).")
+    total = checked + skipped
+    skip_frac = (skipped / total) if total else 0.0
+    log.info(f"Checked {checked}, skipped {skipped} (no symbol mapping, window not elapsed, or no data).")
+    if total >= 5 and skip_frac > 0.20:
+        log.warning(f"check_outcomes: {skipped}/{total} ({skip_frac:.0%}) of unscored calls were skipped this cycle "
+                    f"-- likely a yfinance/data problem (see scoring.window_return warnings above), not just open windows. "
+                    f"Investigate before trusting the hit-rate below.")
 
-    # print running hit-rate
-    res = client.table("ai_calls_log").select("outcome").not_.is_("outcome", "null").execute()
-    outcomes = [r["outcome"] for r in res.data]
+    # print running hit-rate (one count per distinct view, not per logged row)
+    res = client.table("ai_calls_log").select("*").not_.is_("outcome", "null").execute()
+    views = scoring.distinct_views(res.data)
+    outcomes = [r["outcome"] for r in views]
     if outcomes:
         correct = outcomes.count("correct")
         incorrect = outcomes.count("incorrect")
         unclear = outcomes.count("unclear")
         decided = correct + incorrect
         rate = correct / decided * 100 if decided else 0
-        log.info(f"Running hit-rate (excl. unclear): {correct}/{decided} = {rate:.1f}%  (+{unclear} unclear)")
+        log.info(f"Running hit-rate (distinct views, excl. unclear): {correct}/{decided} = {rate:.1f}%  (+{unclear} unclear, {len(res.data) - len(views)} duplicate rows ignored)")
 
 
 if __name__ == "__main__":

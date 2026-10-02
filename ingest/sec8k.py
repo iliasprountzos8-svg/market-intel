@@ -32,7 +32,6 @@ log = get_logger("ingest.sec8k")
 load_dotenv(ROOT / ".env")
 
 EXTRA = [("ASML", "ASML Holding", "0000937966")]  # foreign private issuer: files 6-K
-_blocked = {"n": 0}
 
 
 def universe(only=None):
@@ -45,19 +44,23 @@ def universe(only=None):
 
 
 def fetch_one(item, since_iso):
+    """One company's submissions. On a rate limit (403/429) or a network hiccup, back off and retry
+    instead of abandoning the rest of the universe: a short SEC throttle used to turn into hundreds of
+    'skipped' companies and fail the whole cycle."""
     symbol, name, cik = item
-    if _blocked["n"] >= 5:
-        return item, None, "skipped: too many blocks"
-    time.sleep(0.12)
-    try:
-        r = requests.get(f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json", headers=SEC_HEADERS, timeout=20)
-        if r.status_code in (403, 429):
-            _blocked["n"] += 1
-            return item, None, f"http {r.status_code}"
-        r.raise_for_status()
-        return item, sec_items.parse_submissions(r.json(), symbol, name, cik, since_iso), None
-    except Exception as e:  # noqa: BLE001
-        return item, None, str(e)[:100]
+    err = None
+    for attempt in range(4):
+        time.sleep(0.12 if attempt == 0 else 2.0 * attempt)
+        try:
+            r = requests.get(f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json", headers=SEC_HEADERS, timeout=20)
+            if r.status_code in (403, 429):
+                err = f"http {r.status_code}"
+                continue
+            r.raise_for_status()
+            return item, sec_items.parse_submissions(r.json(), symbol, name, cik, since_iso), None
+        except Exception as e:  # noqa: BLE001
+            err = str(e)[:100]
+    return item, None, err
 
 
 def main(argv=None):

@@ -9,12 +9,32 @@ export default function TrackRecordPage() {
   const { calls, loading } = useMarketData();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const decided = calls.filter((c) => c.outcome === "correct" || c.outcome === "incorrect");
-  const correct = calls.filter((c) => c.outcome === "correct").length;
-  const incorrect = calls.filter((c) => c.outcome === "incorrect").length;
-  const unclear = calls.filter((c) => c.outcome === "unclear").length;
-  const pending = calls.filter((c) => !c.outcome).length;
+  // The same view logged several times (same symbol, direction and scored window) is ONE call.
+  const views = useMemo(() => {
+    const seen = new Set<string>();
+    return calls.filter((c) => {
+      if (!c.outcome || c.entry_price == null || c.exit_price == null) return true;
+      const key = `${c.symbol ?? c.ticker_or_theme}|${c.call}|${Number(c.entry_price).toFixed(4)}|${Number(c.exit_price).toFixed(4)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [calls]);
+  const viewIds = useMemo(() => new Set(views.map((v) => v.id)), [views]);
+  const decided = views.filter((c) => c.outcome === "correct" || c.outcome === "incorrect");
+  const correct = views.filter((c) => c.outcome === "correct").length;
+  const incorrect = views.filter((c) => c.outcome === "incorrect").length;
+  const unclear = views.filter((c) => c.outcome === "unclear").length;
+  const pending = views.filter((c) => !c.outcome).length;
   const hitRate = decided.length > 0 ? (correct / decided.length) * 100 : null;
+  const ci = useMemo(() => {
+    const n = decided.length;
+    if (!n) return null;
+    const z = 1.96, p = correct / n, d = 1 + (z * z) / n;
+    const c = p + (z * z) / (2 * n);
+    const m = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+    return [((c - m) / d) * 100, ((c + m) / d) * 100];
+  }, [decided.length, correct]);
 
   const byTheme = useMemo(() => {
     const map = new Map<string, { correct: number; incorrect: number; total: number }>();
@@ -33,7 +53,7 @@ export default function TrackRecordPage() {
     <div className="container">
       <div className="page-head">
         <h1>Track Record</h1>
-        <div className="sub">Every logged directional call, checked against real price data ~3+ days later</div>
+        <div className="sub">Every logged directional call, checked against real prices after a fixed window. Re-logged views count once; stocks are judged vs the VT benchmark, yields in bp.{ci && ` Hit rate ${hitRate?.toFixed(0)}% (95% CI ${ci[0].toFixed(0)}-${ci[1].toFixed(0)}%, n=${decided.length}): too few calls to prove skill.`}</div>
       </div>
 
       <div className="track-summary">
@@ -83,6 +103,7 @@ export default function TrackRecordPage() {
                 </span>
               )}
               {!c.outcome && <span className="theme-pill">pending</span>}
+              {!viewIds.has(c.id) && <span className="theme-pill" title="Same view, symbol and window as an earlier call: not counted twice">repeat, not counted</span>}
               <span className="call-date">{new Date(c.created_at).toLocaleDateString()}</span>
             </div>
             {c.rationale && <div className="ai-summary" style={{ marginTop: 8 }}>{c.rationale}</div>}

@@ -13,7 +13,7 @@
 ## Layout
 - `analysis/`: story_logic, event_rules, stories, embed_logic + merge_stories (nlp venv), briefing, calibration, reader (off).
 - `ingest/`: sec8k. `nlp/`: FinBERT, embed. `homelab/`: systemd units, bin scripts, agents, hq app, migrations. `deal-radar/`: flip scoring.
-- Tests: `python -m unittest discover -s tests` (83 pass).
+- Tests: `python -m unittest discover -s tests` (126 pass).
 
 ## Gotchas
 - In inline python heredocs, `\b`/`\n` escapes get collapsed (a `\b` became a backspace byte). Use the Edit/Write tools for regexes.

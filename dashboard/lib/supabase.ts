@@ -56,6 +56,9 @@ export type CallLog = {
   invalidation?: string | null;
   asset_return_pct?: number | null;
   excess_return_pct?: number | null;
+  entry_price?: number | null;
+  exit_price?: number | null;
+  scoring_version?: number | null;
 };
 
 // ---- homelab edition (migration 005) ----
