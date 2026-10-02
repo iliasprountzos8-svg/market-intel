@@ -43,6 +43,33 @@ class WeekendWindow(unittest.TestCase):
         self.assertIsNone(self.run_window(datetime(2026, 9, 30, 8, 0, tzinfo=timezone.utc)))
 
 
+class WhyNoResult(unittest.TestCase):
+    """An open window is normal; missing prices for an elapsed window is a real failure and the only
+    case check_outcomes should alert on (it used to cry 'yfinance problem' for every open call)."""
+
+    def run_result(self, created, history):
+        with patch.object(scoring, "_cached_history", history), patch.object(scoring, "datetime") as dt:
+            dt.now.return_value = datetime(2026, 10, 2, 9, 0, tzinfo=timezone.utc)
+            dt.side_effect = datetime
+            return scoring.window_result("CL=F", created, 5)
+
+    def test_open_window_is_open_not_a_failure(self):
+        r = self.run_result(datetime(2026, 9, 30, 8, 0, tzinfo=timezone.utc), fake_history)
+        self.assertEqual(r["reason"], "open")
+
+    def test_elapsed_window_without_prices_is_no_data(self):
+        r = self.run_result(datetime(2026, 9, 21, 8, 0, tzinfo=timezone.utc), lambda *a, **k: None)
+        self.assertEqual(r["reason"], "no_data")
+
+    def test_recent_call_without_prices_is_not_flagged(self):
+        r = self.run_result(datetime(2026, 10, 1, 8, 0, tzinfo=timezone.utc), lambda *a, **k: None)
+        self.assertEqual(r["reason"], "open")
+
+    def test_elapsed_window_scores(self):
+        r = self.run_result(datetime(2026, 9, 26, 8, 0, tzinfo=timezone.utc), fake_history)
+        self.assertEqual(r["reason"], "ok")
+
+
 class Judge(unittest.TestCase):
     def w(self, ret, bp=0):
         return {"return_pct": ret, "change_bp": bp}

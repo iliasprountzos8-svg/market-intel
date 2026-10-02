@@ -119,37 +119,46 @@ def _history(symbol, start, end, attempts=3, backoff=2):
     return None
 
 
+def window_result(symbol, created, horizon_days=DEFAULT_HORIZON_DAYS):
+    """Like window_return but says WHY there is no result: dict with reason 'ok' (plus the numbers),
+    'open' (window not fully elapsed yet: normal, nothing to fix) or 'no_data' (the window has
+    definitely elapsed but prices could not be had: a real data problem worth an alert)."""
+    now = datetime.now(timezone.utc)
+    d = created.astimezone(timezone.utc)
+    cutoff = datetime(d.year, d.month, d.day) - timedelta(days=0 if d.hour >= _close_hour_utc(symbol) else 1)
+    # the anchor close is on or before `cutoff`, so the exit day is at most cutoff + horizon: if even that
+    # is in the past the window has elapsed for sure, and missing prices are a failure, not an open window
+    elapsed_for_sure = (cutoff + timedelta(days=horizon_days)).date() < now.date()
+    s = _cached_history(symbol, cutoff - timedelta(days=10), cutoff + timedelta(days=horizon_days + 5))
+    before = s[s.index <= cutoff] if s is not None else None
+    if before is None or before.empty:
+        return {"reason": "no_data" if elapsed_for_sure else "open"}
+    e_day = before.index[-1]
+    end_day = e_day + timedelta(days=horizon_days)
+    if end_day.date() >= now.date():
+        return {"reason": "open"}  # window not fully elapsed yet
+    upto = s[s.index <= end_day]
+    p0, p1 = float(before.iloc[-1]), float(upto.iloc[-1])
+    if p0 == 0:
+        return {"reason": "no_data"}
+    return {"reason": "ok", "entry_date": e_day.date().isoformat(), "entry_price": p0, "exit_price": p1,
+            "return_pct": (p1 - p0) / p0 * 100.0, "change_bp": (p1 - p0) * 100.0,
+            "exit_date": upto.index[-1].date().isoformat()}
+
+
 def window_return(symbol, created, horizon_days=DEFAULT_HORIZON_DAYS, entry_price=None):
     """Return dict(entry_date, entry_price, exit_price, return_pct, ...) or None if the window
-    has not fully elapsed / no data.
+    has not fully elapsed / no data (see window_result for which).
 
     The window is anchored on a real trading day: entry = last close before the call could be
     acted on (the call day's own close only if it was made after the close on a weekday), exit =
     last close on/before entry + horizon calendar days. Every call made in the same market state
     therefore shares one window, weekends included. `entry_price` is accepted for backwards
     compatibility but ignored: the logged value is a live quote, not a close."""
-    now = datetime.now(timezone.utc)
-    d = created.astimezone(timezone.utc)
-    cutoff = datetime(d.year, d.month, d.day) - timedelta(days=0 if d.hour >= _close_hour_utc(symbol) else 1)
-    s = _cached_history(symbol, cutoff - timedelta(days=10), cutoff + timedelta(days=horizon_days + 5))
-    if s is None:
-        log.warning(f"scoring.window_return: window elapsed for {symbol} but no price data available -- outcome cannot be checked this cycle")
-        return None
-    before = s[s.index <= cutoff]
-    if before.empty:
-        log.warning(f"scoring.window_return: {symbol} has no close on/before {cutoff.date()} in the fetched window")
-        return None
-    e_day = before.index[-1]
-    end_day = e_day + timedelta(days=horizon_days)
-    if end_day.date() >= now.date():
-        return None  # window not fully elapsed yet
-    upto = s[s.index <= end_day]
-    p0, p1 = float(before.iloc[-1]), float(upto.iloc[-1])
-    if p0 == 0:
-        return None
-    return {"entry_date": e_day.date().isoformat(), "entry_price": p0, "exit_price": p1,
-            "return_pct": (p1 - p0) / p0 * 100.0, "change_bp": (p1 - p0) * 100.0,
-            "exit_date": upto.index[-1].date().isoformat()}
+    r = window_result(symbol, created, horizon_days)
+    if r["reason"] == "no_data":
+        log.warning(f"scoring.window_return: window elapsed for {symbol} but no usable price data -- outcome cannot be checked this cycle")
+    return r if r["reason"] == "ok" else None
 
 
 def latest_close(symbol):

@@ -98,19 +98,23 @@ def main():
         log.info("No unscored calls.")
         return
 
-    checked, skipped = 0, 0
+    checked, n_open, n_nodata, n_unmapped = 0, 0, 0, 0
     for c in calls:
         symbol = resolve_symbol(c["ticker_or_theme"], c.get("symbol"))
         if not symbol:
             log.warning(f"no symbol mapping for '{c['ticker_or_theme']}' -- add one to scoring.TICKER_MAP")
-            skipped += 1
+            n_unmapped += 1
             continue
 
         created = datetime.fromisoformat(c["created_at"].replace("Z", "+00:00"))
         horizon = int(c.get("horizon_days") or scoring.DEFAULT_HORIZON_DAYS)
-        w = scoring.window_return(symbol, created, horizon)
-        if w is None:
-            skipped += 1  # window still open, or no price data yet: try again next cycle
+        w = scoring.window_result(symbol, created, horizon)
+        if w["reason"] != "ok":
+            if w["reason"] == "open":
+                n_open += 1  # normal: the window has not elapsed yet
+            else:
+                n_nodata += 1
+                log.warning(f"no price data for {symbol} although the {horizon}d window has elapsed (call {str(c['id'])[:8]})")
             continue
 
         bench = scoring.window_return(scoring.BENCHMARK, created, horizon) if symbol in scoring.STOCKS else None
@@ -135,13 +139,11 @@ def main():
         log.info(f"{c['ticker_or_theme']:30s} called {c['call']:8s} -> {symbol:10s} {horizon}d {w['return_pct']:+.2f}% -> {outcome} ({basis})")
         checked += 1
 
-    total = checked + skipped
-    skip_frac = (skipped / total) if total else 0.0
-    log.info(f"Checked {checked}, skipped {skipped} (no symbol mapping, window not elapsed, or no data).")
-    if total >= 5 and skip_frac > 0.20:
-        log.warning(f"check_outcomes: {skipped}/{total} ({skip_frac:.0%}) of unscored calls were skipped this cycle "
-                    f"-- likely a yfinance/data problem (see scoring.window_return warnings above), not just open windows. "
-                    f"Investigate before trusting the hit-rate below.")
+    scoreable = checked + n_nodata  # calls whose window had elapsed: the only ones where missing data is a problem
+    log.info(f"Checked {checked}; still open {n_open}; no price data {n_nodata}; unmapped {n_unmapped}.")
+    if n_nodata and scoreable >= 3 and n_nodata / scoreable > 0.20:
+        log.warning(f"check_outcomes: {n_nodata}/{scoreable} calls with an elapsed window had no price data this cycle "
+                    f"-- likely a yfinance/network problem. Investigate before trusting the hit-rate below.")
 
     # print running hit-rate (one count per distinct view, not per logged row)
     res = client.table("ai_calls_log").select("*").not_.is_("outcome", "null").execute()
