@@ -35,7 +35,10 @@ from logger import get_logger  # noqa: E402
 warnings.filterwarnings("ignore")
 log = get_logger("lab.ablation")
 ROOT = ld.ROOT
-MIN_NEWS_DAYS = 250
+MIN_NEWS_DAYS = 250  # GDELT days required before the news arm runs
+GD_FEATS = ["g_att_1", "g_att_ratio", "g_n_5", "g_tone_5", "g_tone_chg"]
+GD_FROM = pd.Timestamp("2023-03-01")  # 60-day windows need warm-up after the 2023-01-01 backfill start
+GD_TEST_FROM = "2024-01-01"  # leaves ~10 months of training before the first test fold
 EV_FEATS = ["e_n8k_5", "e_n8k_20", "e_earn_20", "e_n502_60", "e_n101_20", "e_days_since_earn"]
 
 
@@ -76,6 +79,33 @@ def paired(ic_a, ic_b, h):
             "ic_diff": float(d.mean()), "paired_t": float(t)}
 
 
+def gdelt_features(sessions, symbols):
+    """(date, symbol) frame of GDELT attention/tone features. GDELT day D is only complete at the end of D (UTC),
+    so session t uses days up to t-1 (calendar lag), never the same day."""
+    g = pd.read_parquet(ROOT / "data" / "gdelt_daily.parquet")
+    g["date"] = pd.to_datetime(g["date"])
+    total = g[g.symbol == "__ALL__"].set_index("date")["n_art"].sort_index()
+    g = g[g.symbol.isin(symbols)]
+    cal = pd.date_range(g["date"].min(), g["date"].max())
+    n = g.pivot(index="date", columns="symbol", values="n_art").reindex(cal).reindex(columns=symbols).fillna(0)
+    tone = g.pivot(index="date", columns="symbol", values="tone").reindex(cal).reindex(columns=symbols)
+    share = n.div(total.reindex(cal).replace(0, np.nan), axis=0) * 1e6  # mentions per million articles that day
+    w = n.where(n > 0)
+    n5, n60 = n.rolling(5, min_periods=1).sum(), n.rolling(60, min_periods=20).sum() / 12
+    t5 = (tone * n).rolling(5, min_periods=1).sum() / n.rolling(5, min_periods=1).sum().replace(0, np.nan)
+    t60 = (tone * n).rolling(60, min_periods=20).sum() / n.rolling(60, min_periods=20).sum().replace(0, np.nan)
+    feats = {"g_att_1": np.log1p(share), "g_att_ratio": (n5 / n60.replace(0, np.nan)).clip(upper=20), "g_n_5": np.log1p(n5),
+             "g_tone_5": t5, "g_tone_chg": t5 - t60}
+    lagged = {}
+    for k, v in feats.items():
+        v = v.reindex(sessions - pd.Timedelta(days=1))  # value known at the START of session t = day t-1
+        v.index = sessions
+        lagged[k] = ld._stack(v)
+    out = pd.DataFrame(lagged)
+    out.index.names = ["date", "symbol"]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--h", type=int, default=5)
@@ -89,16 +119,32 @@ def main():
     except Exception as e:  # noqa: BLE001
         log.warning(f"ablation: point-in-time membership unavailable ({e})")
     symbols = sorted(panel.index.get_level_values("symbol").unique())
-    ev = event_features(ee.load(), close.index, symbols)
+    parts = [event_features(ee.load(), close.index, symbols)]
+    gdelt_file = ROOT / "data" / "gdelt_daily.parquet"
+    gd_days = 0
+    if gdelt_file.exists():
+        gdf = pd.read_parquet(gdelt_file, columns=["date", "symbol"])
+        gd_days = int(gdf[gdf.symbol == "__ALL__"]["date"].nunique())
+    use_gd = gd_days >= MIN_NEWS_DAYS
+    if use_gd:
+        parts.append(gdelt_features(close.index, symbols))
     R = lw.ranked(panel)
     Rc = list(R.columns)
     ycol = f"y{args.h}"
-    data = pd.concat([R, panel[[ycol]], ev], axis=1).loc[panel.index].dropna(subset=Rc)
+    data = pd.concat([R, panel[[ycol]]] + parts, axis=1).loc[panel.index].dropna(subset=Rc)
     data[EV_FEATS] = data[EV_FEATS].fillna({"e_days_since_earn": 120}).fillna(0)
+    arms = {"price_only": Rc, "events": Rc + EV_FEATS}
+    start = args.start
+    if use_gd:
+        data = data[data.index.get_level_values("date") >= GD_FROM]  # identical rows for every arm
+        data[GD_FEATS] = data[GD_FEATS].fillna({"g_att_ratio": 1.0}).fillna(0)
+        arms["gdelt"] = Rc + GD_FEATS
+        arms["events+gdelt"] = Rc + EV_FEATS + GD_FEATS
+        start = max(args.start, GD_TEST_FROM)
     yrank = data[ycol].groupby(level="date").rank(pct=True)
     dates = data.index.get_level_values("date").unique().sort_values()
-    folds = pd.date_range(pd.Timestamp(args.start), dates.max(), freq="QS")
-    base, withev = [], []
+    folds = pd.date_range(pd.Timestamp(start), dates.max(), freq="QS")
+    preds = {k: [] for k in arms}
     for k, f0 in enumerate(folds):
         f1 = folds[k + 1] if k + 1 < len(folds) else dates.max() + pd.Timedelta(days=1)
         test = data[(data.index.get_level_values("date") >= f0) & (data.index.get_level_values("date") < f1)]
@@ -107,23 +153,27 @@ def main():
         if len(train) < 50000 or test.empty:
             continue
         tr = train.iloc[::3]
-        m0 = lw.fit_hgb(tr[Rc].values, yrank.loc[tr.index].values)
-        m1 = lw.fit_hgb(tr[Rc + EV_FEATS].values, yrank.loc[tr.index].values)
-        base.append(pd.Series(m0.predict(test[Rc].values), index=test.index))
-        withev.append(pd.Series(m1.predict(test[Rc + EV_FEATS].values), index=test.index))
-    sb, se = pd.concat(base), pd.concat(withev)
-    y = data.loc[sb.index, ycol]
-    res = paired(lw.daily_ic(sb, y), lw.daily_ic(se, y), args.h)
-    sp_b, sp_e = lw.decile_spread(sb, y), lw.decile_spread(se, y)
-    news = ld.news_features(data.index)
-    news_days = int(news.dropna(how="all").index.get_level_values("date").nunique()) if len(news.columns) else 0
-    verdict = ("Event features add measurable predictive power (paired t > 2)." if res and res["paired_t"] > 2 else
-               "Event features do NOT add significant power over price-only features." if res else "Too few days to test.")
-    out = {"generated": datetime.now(timezone.utc).isoformat(), "horizon_days": args.h, "test_from": args.start,
-           "result": res, "spread_gross_pct": {"price_only": float(sp_b.mean() * 100), "with_events": float(sp_e.mean() * 100)},
-           "event_features": EV_FEATS, "news_feature_days": news_days,
-           "news_note": (f"news features cover {news_days} trading days; need {MIN_NEWS_DAYS}+ for a walk-forward test"
-                         if news_days < MIN_NEWS_DAYS else "news history sufficient (not yet wired in)"),
+        for name, cols in arms.items():
+            m = lw.fit_hgb(tr[cols].values, yrank.loc[tr.index].values)
+            preds[name].append(pd.Series(m.predict(test[cols].values), index=test.index))
+    scores = {k: pd.concat(v) for k, v in preds.items() if v}
+    base = scores["price_only"]
+    y = data.loc[base.index, ycol]
+    ic_base = lw.daily_ic(base, y)
+    results, spreads = {}, {"price_only": float(lw.decile_spread(base, y).mean() * 100)}
+    for name, sc in scores.items():
+        if name == "price_only":
+            continue
+        results[name] = paired(ic_base, lw.daily_ic(sc, y), args.h)
+        spreads[name] = float(lw.decile_spread(sc, y).mean() * 100)
+    sig = [k for k, r in results.items() if r and r["paired_t"] > 2]
+    verdict = (f"Feature set(s) {sig} add measurable predictive power over price-only (paired t > 2); confirm on the forward ledger."
+               if sig else "No feature set adds significant power over price-only features." if results else "Too few days to test.")
+    out = {"generated": datetime.now(timezone.utc).isoformat(), "horizon_days": args.h, "test_from": start,
+           "arms": {k: v for k, v in arms.items()}, "results_vs_price_only": results, "spread_gross_pct": spreads,
+           "gdelt_days": gd_days, "gdelt_used": use_gd,
+           "news_note": ("GDELT news features included (attention, mentions ratio, tone)." if use_gd else
+                         f"GDELT history has {gd_days} days; need {MIN_NEWS_DAYS}+ for a walk-forward test"),
            "point_in_time": True, "verdict": verdict, "seconds": round(time.time() - t0)}
     (ROOT / "logs").mkdir(exist_ok=True)
     (ROOT / "logs" / f"ablation-h{args.h}.json").write_text(json.dumps(out, indent=1))
