@@ -12,8 +12,8 @@
 
 ## Layout
 - `analysis/`: story_logic, event_rules, stories, embed_logic + merge_stories (nlp venv), briefing, calibration, reader (off).
-- `ingest/`: sec8k. `nlp/`: FinBERT, embed. `homelab/`: systemd units, bin scripts, agents, hq app, migrations. `deal-radar/`: flip scoring.
-- Tests: `python -m unittest discover -s tests` (126 pass).
+- `ingest/`: sec8k. `lab/`: walk-forward (point-in-time S&P via universe_pit), edgar_events + event_study (8-K, 2015+), ablation (8-K features vs price-only); results in logs/event-study.md, logs/ablation-h5.json. `nlp/`: FinBERT, embed. `homelab/`: systemd units, bin scripts, agents, hq app, migrations. `deal-radar/`: flip scoring.
+- Tests: `python -m unittest discover -s tests` (138 pass, 2 skip locally: need scipy).
 
 ## Gotchas
 - In inline python heredocs, `\b`/`\n` escapes get collapsed (a `\b` became a backspace byte). Use the Edit/Write tools for regexes.

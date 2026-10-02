@@ -27,6 +27,7 @@ sys.path.append(str(Path(__file__).parent))
 sys.path.append(str(Path(__file__).parent.parent))
 from logger import get_logger  # noqa: E402
 import scoring  # noqa: E402
+import calibration  # noqa: E402
 
 log = get_logger("analysis.track_record")
 load_dotenv()
@@ -146,6 +147,12 @@ def main():
         lines.append("by confidence: " + ", ".join(f"{k} {v[0]}/{v[1]}" for k, v in by_conf.items()))
     elif "confidence" not in have:
         lines.append("confidence not stored in the database yet (run migration 004) -> calibration impossible")
+    pairs = [(x["confidence"] / 100.0, 1 if x["verdict"] == "correct" else 0) for x in decided if x["confidence"] is not None]
+    if pairs:
+        b = calibration.brier(pairs)
+        br = sum(o for _, o in pairs) / len(pairs)
+        bb = calibration.brier([(br, o) for _, o in pairs])
+        lines.append(f"Brier {b:.3f} vs constant-baseline {bb:.3f} (skill {(1 - b / bb):+.0%}; n={len(pairs)}, lower is better)" if bb else f"Brier {b:.3f}")
     if stock_bull:
         lines.append(f"bullish stock calls beating VT: {beat}/{len(stock_bull)}, average excess {avg_excess:+.2f}%")
     if unscorable:

@@ -36,3 +36,15 @@ class Bins(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DistinctAndBaseline(unittest.TestCase):
+    def test_relogged_view_counted_once(self):
+        import calibration
+        row = (55, "correct", "MSFT", "msft", "bearish", 516.17, 512.9)
+        self.assertEqual(len(calibration.distinct_rows([row, row, row, (55, "correct", "NVDA", "nvda", "bullish", 1.0, 2.0)])), 2)
+
+    def test_report_mentions_constant_baseline(self):
+        import calibration
+        out = calibration.report([(0.55, 1), (0.55, 0), (0.6, 1), (0.5, 0)])
+        self.assertIn("Brier skill", out)

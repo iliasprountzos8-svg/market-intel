@@ -26,12 +26,17 @@ import yfinance as yf
 from dotenv import load_dotenv
 
 sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(Path(__file__).parent.parent))
 import signals  # noqa: E402
+from fdr import bh_fdr  # noqa: E402
+from logger import get_logger  # noqa: E402
 
 load_dotenv()
+logger = get_logger("signal_eval")
 ROOT = Path(__file__).parent.parent
 PRICE_SYM = {"OIL": "CL=F", "GOLD": "GC=F", "USD": "DX-Y.NYB", "MARKET": "^GSPC", "RATES": "^TNX"}
 MODELS = ("lex", "finbert", "ens", "old", "form4")
+FDR_Q = 0.10
 
 
 def spearman(x, y):
@@ -111,8 +116,25 @@ def main():
     tests = len(summary)
     sig = [k for k, v in summary.items() if v["p"] < 0.05 and v["n"] >= 30]
     expected_false = tests * 0.05
+    # Multiple-testing correction: this family runs `tests` (up to 48) independent-ish tests, so a bare
+    # p<0.05 cutoff is expected to throw up ~5% false positives by chance. Apply Benjamini-Hochberg FDR
+    # correction across the whole family and only call something "skill" if it survives at q=0.10.
+    keys = list(summary.keys())
+    pvals_for_fdr = [summary[k]["p"] if summary[k]["n"] >= 30 else None for k in keys]
+    rejected, crit = bh_fdr(pvals_for_fdr, q=FDR_Q)
+    for k, rej, c in zip(keys, rejected, crit):
+        summary[k]["skill_fdr"] = bool(rej)
+        summary[k]["fdr_q"] = FDR_Q
+        summary[k]["fdr_critical_value"] = c
+        raw_sig = summary[k]["p"] is not None and summary[k]["p"] < 0.05 and summary[k]["n"] >= 30
+        if raw_sig != rej:
+            logger.warning(f"signal_eval: raw p<0.05 vs skill_fdr disagree for {k}: "
+                            f"raw_sig={raw_sig} skill_fdr={rej} p={summary[k]['p']:.4f} n={summary[k]['n']}")
+    sig_fdr = [k for k, v in summary.items() if v.get("skill_fdr")]
     lines.append(f"VERDICT: {len(sig)} of {tests} tests have p<0.05 (about {expected_false:.0f} would be expected by chance alone; windows overlap so p-values are optimistic). "
                  + ("Nothing beyond chance yet." if len(sig) <= expected_false + 1 else "Possible signal in: " + ", ".join(sig[:5]) + " - a hypothesis for the forward paper ledger, not proof."))
+    lines.append(f"VERDICT (FDR-corrected, preferred): {len(sig_fdr)} of {tests} tests survive Benjamini-Hochberg FDR correction at q={FDR_Q}. "
+                 + ("Nothing beyond chance." if not sig_fdr else "Possible signal in: " + ", ".join(sig_fdr[:5]) + " - still a hypothesis for the forward paper ledger, not proof."))
     print("\n".join(lines))
     (ROOT / "logs").mkdir(exist_ok=True)
     (ROOT / "logs" / "signal-eval.json").write_text(json.dumps({"generated": datetime.now(timezone.utc).isoformat(), "report": "\n".join(lines), "summary": summary}, default=str, indent=1))
