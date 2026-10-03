@@ -50,13 +50,16 @@ ROOT = ld.ROOT
 FEATS = ["f_r1", "f_r5", "f_r20", "f_r60", "f_mom_12_1", "f_vol20", "f_vol60", "f_dd_high", "f_dvol_ratio", "f_rel5", "f_rel20", "f_sec_rel20", "f_sec_mom_12_1"]
 COST_BPS = 10.0
 FDR_Q = 0.10
+FEATS_LONG = [f for f in FEATS if f != "f_dvol_ratio"]  # the 2015+ cache has closes only
+LONG_HORIZONS = (1, 5, 20, 60)
+LONG_START = "2018-01-01"  # mom_12_1 needs a year of warm-up after 2014-12, plus training rows before the first fold
 MOM_STRATEGIES = ("mom", "secmom", "momvol")  # momentum-family strategies most exposed to survivorship bias
 N_SUBSAMPLES = 5
 SUBSAMPLE_FRAC = 0.7
 
 
-def ranked(panel):
-    r = ld.cs_rank(panel, FEATS)
+def ranked(panel, feats=FEATS):
+    r = ld.cs_rank(panel, feats)
     r.columns = [c.replace("f_", "r_") for c in r.columns]
     return r
 
@@ -134,18 +137,53 @@ def fit_hgb(Xtr, ytr):
     return m
 
 
+def family_fdr(runs, q=FDR_Q):
+    """BH-FDR over every (horizon, strategy) test at once. `runs` = {h: [result, ...]}. Testing 3 horizons x 6
+    strategies separately and keeping each run's own correction would understate the multiple-testing burden."""
+    rows = [(h, r) for h, rs in sorted(runs.items()) for r in rs if "p_value" in r]
+    if not rows:
+        return []
+    rejected, crit = bh_fdr([r["p_value"] for _, r in rows], q=q)
+    return [{"h": h, "name": r["name"], "ic_mean": r["ic_mean"], "ic_t": r["ic_t"], "p_value": r["p_value"],
+             "spread_net_pct": r["spread_net_pct"], "skill_fdr_family": bool(rej and r["spread_net_pct"] > 0), "critical": c}
+            for (h, r), rej, c in zip(rows, rejected, crit)]
+
+
+def family_report():
+    runs = {}
+    for h in LONG_HORIZONS:
+        f = ROOT / "logs" / f"lab-walkforward-long-h{h}.json"
+        if f.exists():
+            runs[h] = json.loads(f.read_text())["results"]
+    fam = family_fdr(runs)
+    (ROOT / "logs" / "lab-walkforward-long-family.json").write_text(json.dumps({"generated": datetime.now(timezone.utc).isoformat(), "horizons": sorted(runs), "tests": fam}, indent=1))
+    print(f"long-history family: {len(fam)} tests over horizons {sorted(runs)}, BH q={FDR_Q}; passing: {sum(t['skill_fdr_family'] for t in fam)}")
+    for t in sorted(fam, key=lambda t: t["p_value"])[:8]:
+        print(f"  h={t['h']:>2} {t['name']:7s} IC {t['ic_mean']:+.3f} (t={t['ic_t']:+.1f}, p={t['p_value']:.3f}) net {t['spread_net_pct']:+.2f}% pass={t['skill_fdr_family']}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--h", type=int, default=5)
-    ap.add_argument("--start", default="2023-01-01")
+    ap.add_argument("--start", default=None, help="first test quarter (default 2023-01-01, or 2018-01-01 with --long)")
+    ap.add_argument("--long", action="store_true", help="2015+ closes from event_study's cache (no volume features); writes lab-walkforward-long-h*.json and leaves the daily model and weekly outputs untouched")
+    ap.add_argument("--family", action="store_true", help="only combine the lab-walkforward-long-h*.json files into one BH-FDR family and exit")
     ap.add_argument("--refresh", action="store_true", help="re-download prices first")
     ap.add_argument("--no-pit", action="store_true", help="skip the point-in-time S&P membership filter (reproduces the old, survivorship-flattered numbers)")
     args = ap.parse_args()
+    if args.family:
+        return family_report()
+    args.start = args.start or (LONG_START if args.long else "2023-01-01")
     t0 = time.time()
-    if args.refresh or not ld.PRICES.exists():
-        ld.update_prices(full=not ld.PRICES.exists())
-    close, vol = ld.load_wide()
-    panel = ld.build_panel(close, vol)
+    feats = FEATS_LONG if args.long else FEATS
+    if args.long:
+        close = ld.load_wide_long()
+        panel = ld.build_panel(close, None, horizons=LONG_HORIZONS)
+    else:
+        if args.refresh or not ld.PRICES.exists():
+            ld.update_prices(full=not ld.PRICES.exists())
+        close, vol = ld.load_wide()
+        panel = ld.build_panel(close, vol)
     pit = {"applied": False}
     if not args.no_pit:
         try:
@@ -159,7 +197,7 @@ def main():
         except Exception as e:  # noqa: BLE001
             logger.warning(f"lab_wf: point-in-time membership unavailable ({e}); running with today's members (survivorship-flattered)")
     ycol = f"y{args.h}"
-    R = ranked(panel)
+    R = ranked(panel, feats)
     Rc = list(R.columns)
     data = pd.concat([R, panel[[ycol]]], axis=1).dropna(subset=Rc)
     yrank = data[ycol].groupby(level="date").rank(pct=True)
@@ -183,7 +221,8 @@ def main():
         scores["lowvol"].append(-test["r_vol60"])
         scores["high52"].append(test["r_dd_high"])
         scores["secmom"].append(test["r_sec_mom_12_1"])
-        scores["momvol"].append((test["r_mom_12_1"] + test["r_dvol_ratio"]) / 2)
+        if not args.long:  # momvol needs volume, which the long cache lacks
+            scores["momvol"].append((test["r_mom_12_1"] + test["r_dvol_ratio"]) / 2)
     results = []
     for name, parts in scores.items():
         if not parts:
@@ -204,10 +243,11 @@ def main():
                             f"skill(raw t>2)={r['skill']} skill_fdr(BH q={FDR_Q})={r['skill_fdr']} "
                             f"p={r['p_value']:.4f} t={r['ic_t']:.2f}")
     # final model on everything, for the daily predictor
-    full = data[data[ycol].notna()].iloc[::3]
-    final = fit_hgb(full[Rc].values, yrank.loc[full.index].values)
-    (ld.DATA / "models").mkdir(parents=True, exist_ok=True)
-    joblib.dump({"model": final, "features": Rc, "h": args.h, "trained": datetime.now(timezone.utc).isoformat()}, ld.DATA / "models" / f"hgb_h{args.h}.joblib")
+    if not args.long:  # the long run is research only; it must not replace the daily predictor's model
+        full = data[data[ycol].notna()].iloc[::3]
+        final = fit_hgb(full[Rc].values, yrank.loc[full.index].values)
+        (ld.DATA / "models").mkdir(parents=True, exist_ok=True)
+        joblib.dump({"model": final, "features": Rc, "h": args.h, "trained": datetime.now(timezone.utc).isoformat()}, ld.DATA / "models" / f"hgb_h{args.h}.joblib")
     out = {"generated": datetime.now(timezone.utc).isoformat(), "horizon_days": args.h, "test_from": args.start, "cost_bps_per_side": COST_BPS,
            "results": results, "rows": int(len(data)), "symbols": int(data.index.get_level_values("symbol").nunique()),
            "survivorship_bias_warning": True, "point_in_time": pit,
@@ -220,7 +260,9 @@ def main():
                    "70%-subsample stability check on momentum-family strategies (subsample_robustness_stable). "
                    "Treat any 'skill'/'skill_fdr' as a hypothesis to confirm with the forward paper ledger, not proof."}
     (ROOT / "logs").mkdir(exist_ok=True)
-    (ROOT / "logs" / f"lab-walkforward-h{args.h}.json").write_text(json.dumps(out, indent=1))
+    out["long_history"] = bool(args.long)
+    tag = "long-" if args.long else ""
+    (ROOT / "logs" / f"lab-walkforward-{tag}h{args.h}.json").write_text(json.dumps(out, indent=1))
     print("  CAVEAT: universe = today's S&P 500 members (survivorship bias); confirm with the forward paper ledger.")
     print(f"walk-forward h={args.h}d, {out['symbols']} symbols, {out['rows']} rows, {time.time() - t0:.0f}s")
     for r in results:

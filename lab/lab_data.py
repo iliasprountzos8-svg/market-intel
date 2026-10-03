@@ -26,6 +26,7 @@ log = get_logger("lab.lab_data")
 ROOT = Path(__file__).parent.parent
 DATA = ROOT / "data"
 PRICES = DATA / "prices.parquet"
+LONG = DATA / "prices_long.parquet"  # event_study's cache: closes since 2014-12, no volume
 BENCH = ["SPY", "VT", "QQQ", "^VIX", "^TNX", "CL=F", "GC=F", "DX-Y.NYB"]
 EXTRA = ["ASML", "TSM", "ARM"]
 HORIZONS = (1, 5, 20)
@@ -119,6 +120,17 @@ def load_wide():
     return close[valid], vol[valid]
 
 
+def load_wide_long(min_names=300):
+    """Closes since 2014-12 from event_study's cache (close only: no volume features). Same equity-day filter idea
+    as load_wide, with a lower bar because early history has fewer of today's members listed."""
+    df = pd.read_parquet(LONG)
+    df["date"] = pd.to_datetime(df["date"])
+    close = df.pivot(index="date", columns="symbol", values="close").sort_index()
+    syms, _ = universe()
+    eq = [c for c in close.columns if c in set(syms)]
+    return close[close[eq].notna().sum(axis=1) >= min_names]
+
+
 def _stack(df):
     try:
         return df.stack(future_stack=True)
@@ -142,8 +154,9 @@ def build_panel(close, vol, horizons=HORIZONS):
     feats["vol20"] = ret.rolling(20).std()
     feats["vol60"] = ret.rolling(60).std()
     feats["dd_high"] = c / c.rolling(252, min_periods=120).max() - 1
-    dv = (c * vol[cols])
-    feats["dvol_ratio"] = dv / dv.rolling(60).mean()
+    if vol is not None:  # the long-history cache has no volume
+        dv = (c * vol[cols])
+        feats["dvol_ratio"] = dv / dv.rolling(60).mean()
     spy5, spy20 = spy.pct_change(5), spy.pct_change(20)
     feats["rel5"] = feats["r5"].sub(spy5, axis=0)
     feats["rel20"] = feats["r20"].sub(spy20, axis=0)
