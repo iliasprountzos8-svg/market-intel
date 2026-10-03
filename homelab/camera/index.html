@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/__TOKEN__/manifest.json">
+<title>Home Camera</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0f1216; color: #e8eaed; font: 16px/1.4 -apple-system, system-ui, sans-serif;
+         display: flex; flex-direction: column; align-items: center; padding: 24px 16px; min-height: 100vh; box-sizing: border-box; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 20px; letter-spacing: 0.02em; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab { padding: 8px 18px; border-radius: 999px; background: #1b1f26; color: #9aa0a6; font-size: 14px;
+         font-weight: 600; border: none; cursor: pointer; }
+  .tab.active { background: #2a2f36; color: #e8eaed; }
+  .video-wrap { position: relative; width: 100%; max-width: 480px; }
+  video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 4/3; display: block; }
+  .tap-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+                 background: rgba(0,0,0,0.55); border-radius: 8px; border: none; color: #e8eaed;
+                 font-size: 16px; font-weight: 600; cursor: pointer; }
+  .tap-overlay.show { display: flex; }
+  .status { margin: 16px 0; font-size: 14px; color: #9aa0a6; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.on { background: #34d058; }
+  .dot.off { background: #5f6368; }
+  .row { display: flex; gap: 10px; margin-top: 12px; }
+  button { font-size: 17px; font-weight: 600; padding: 14px 28px; border-radius: 999px; border: none; min-width: 160px; }
+  button.secondary { background: #2a2f36; color: #e8eaed; font-size: 15px; padding: 14px 20px; min-width: auto; }
+  button.start { background: #34d058; color: #0f1216; }
+  button.stop { background: #f85149; color: #0f1216; }
+  button:disabled { opacity: 0.5; }
+  .hint { margin-top: 20px; font-size: 12px; color: #5f6368; text-align: center; max-width: 320px; }
+  .sessions { margin-top: 28px; width: 100%; max-width: 480px; }
+  .sessions h2 { font-size: 13px; font-weight: 600; color: #9aa0a6; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 8px; }
+  .sessions ul { list-style: none; padding: 0; margin: 0; font-size: 13px; color: #9aa0a6; }
+  .sessions li { padding: 6px 0; border-top: 1px solid #21262d; display: flex; justify-content: space-between; }
+  .snap-preview { margin-top: 16px; max-width: 320px; border-radius: 8px; display: none; }
+</style>
+</head>
+<body>
+  <h1>Home Camera</h1>
+  <div class="tabs" id="tabs"></div>
+  <div class="video-wrap">
+    <video id="v" playsinline muted controls></video>
+    <button id="tapOverlay" class="tap-overlay" type="button">Tap to view</button>
+  </div>
+  <div class="status"><span id="dot" class="dot off"></span><span id="statusText">checking...</span></div>
+  <div class="row">
+    <button id="toggle" disabled>...</button>
+    <button id="snap" class="secondary">Snapshot</button>
+  </div>
+  <img id="snapPreview" class="snap-preview">
+  <p class="hint">No auto-stop. Turn it off yourself when you're done -- you'll get a reminder ping if it's left on.</p>
+
+  <div class="sessions" id="sessionsBox">
+    <h2>Recent sessions</h2>
+    <ul id="sessionList"><li>loading...</li></ul>
+  </div>
+
+<script src="/__TOKEN__/hls.js"></script>
+<script>
+const TOKEN = "__TOKEN__";
+const VICTUS_ENDPOINT = "__VICTUS_ENDPOINT__";  // e.g. "http://100.114.19.15:8097/<token>/", or "" if not set up
+
+// Two independent capture sources, one relay: mediamtx (on the homelab) holds both streams, so
+// viewing either is just a different path proxied through this same app. Only start/stop for
+// "victus" goes to a different origin (Victus's own tiny agent) -- there's no reason for the two
+// servers to trust each other, so the phone's own browser is the bridge, exactly as far as it
+// needs to be and no further. Snapshot/session-log stay homelab-only for now (Victus is a smaller,
+// on-demand-only agent without those extras).
+const SOURCES = {
+  cam: {
+    label: "Homelab", streamUrl: `/${TOKEN}/stream/master.m3u8`,
+    statusUrl: `/${TOKEN}/api/status`, startUrl: `/${TOKEN}/api/start`, stopUrl: `/${TOKEN}/api/stop`,
+    hasExtras: true,
+  },
+  ...(VICTUS_ENDPOINT ? {
+    victus: {
+      label: "Victus", streamUrl: `/${TOKEN}/stream/victus/master.m3u8`,
+      statusUrl: `${VICTUS_ENDPOINT}api/status`, startUrl: `${VICTUS_ENDPOINT}api/start`, stopUrl: `${VICTUS_ENDPOINT}api/stop`,
+      hasExtras: false,
+    },
+  } : {}),
+};
+
+const video = document.getElementById("v");
+const dot = document.getElementById("dot");
+const statusText = document.getElementById("statusText");
+const toggle = document.getElementById("toggle");
+const snapBtn = document.getElementById("snap");
+const snapPreview = document.getElementById("snapPreview");
+const sessionList = document.getElementById("sessionList");
+const sessionsBox = document.getElementById("sessionsBox");
+const tapOverlay = document.getElementById("tapOverlay");
+const tabsEl = document.getElementById("tabs");
+
+let hls = null;
+let isOn = false;
+let current = "cam";
+
+function renderTabs() {
+  tabsEl.innerHTML = Object.entries(SOURCES).map(([key, s]) =>
+    `<button class="tab ${key === current ? "active" : ""}" data-key="${key}">${s.label}</button>`).join("");
+  tabsEl.querySelectorAll(".tab").forEach(btn => btn.addEventListener("click", () => switchSource(btn.dataset.key)));
+}
+
+function switchSource(key) {
+  if (key === current) return;
+  current = key;
+  renderTabs();
+  detachStream();
+  snapBtn.style.display = SOURCES[key].hasExtras ? "" : "none";
+  sessionsBox.style.display = SOURCES[key].hasExtras ? "" : "none";
+  statusText.textContent = "checking...";
+  refreshStatus();
+  if (SOURCES[key].hasExtras) refreshSessions();
+}
+
+// Browsers only allow autoplay (even muted) reliably when play() is called as an immediate,
+// direct result of a user gesture -- by the time attachStream() runs (after a status poll and a
+// setTimeout), that gesture context is long gone in most browsers, so play() silently gets
+// rejected: the toggle correctly says "Live" but the video never appears. tryPlay() shows a
+// "Tap to view" overlay whenever that happens, which is a genuine click and is guaranteed to work.
+function tryPlay() {
+  video.muted = true;  // set the IDL property explicitly, not just the HTML attribute (Safari)
+  video.play().then(() => tapOverlay.classList.remove("show"))
+              .catch(() => tapOverlay.classList.add("show"));
+}
+
+function attachStream() {
+  if (hls) { hls.destroy(); hls = null; }
+  const streamUrl = SOURCES[current].streamUrl;
+  // hls.js first, native <video src> only as a fallback: some Chromium builds report "maybe" for
+  // canPlayType("application/vnd.apple.mpegurl") without actually being able to demux HLS (fails
+  // with DEMUXER_ERROR_COULD_NOT_PARSE) -- checking Hls.isSupported() first avoids that trap and
+  // matches hls.js's own recommended detection order.
+  if (window.Hls && Hls.isSupported()) {
+    hls = new Hls({ liveSyncDurationCount: 2 });
+    hls.loadSource(streamUrl);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, tryPlay);
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = streamUrl;
+    tryPlay();
+  }
+}
+
+function detachStream() {
+  if (hls) { hls.destroy(); hls = null; }
+  video.removeAttribute("src");
+  video.load();
+  tapOverlay.classList.remove("show");
+}
+
+tapOverlay.addEventListener("click", tryPlay);
+
+function fmtTime(iso) {
+  if (!iso) return "--";
+  const d = new Date(iso);
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtDuration(startIso, endIso) {
+  if (!endIso) return "still on";
+  const s = Math.max(0, Math.round((new Date(endIso) - new Date(startIso)) / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+async function refreshSessions() {
+  if (!SOURCES[current].hasExtras) return;
+  try {
+    const r = await fetch(`/${TOKEN}/api/sessions`);
+    const list = await r.json();
+    sessionList.innerHTML = list.length
+      ? list.map(s => `<li><span>${fmtTime(s.start)}</span><span>${fmtDuration(s.start, s.end)}</span></li>`).join("")
+      : "<li>no sessions yet</li>";
+  } catch (e) {
+    sessionList.innerHTML = "<li>unreachable</li>";
+  }
+}
+
+async function refreshStatus() {
+  const key = current;
+  try {
+    const r = await fetch(SOURCES[key].statusUrl);
+    const j = await r.json();
+    if (key !== current) return;  // switched tabs while this was in flight
+    isOn = j.on;
+    dot.className = "dot " + (isOn ? "on" : "off");
+    statusText.textContent = isOn ? "Live" : "Off";
+    toggle.textContent = isOn ? "Turn off" : "Turn on";
+    toggle.className = isOn ? "stop" : "start";
+    toggle.disabled = false;
+    if (isOn && !hls && !video.src) setTimeout(() => { if (key === current) attachStream(); }, 1500);
+    if (!isOn) detachStream();
+  } catch (e) {
+    if (key === current) statusText.textContent = "unreachable";
+  }
+}
+
+toggle.addEventListener("click", async () => {
+  toggle.disabled = true;
+  toggle.textContent = "...";
+  await fetch(isOn ? SOURCES[current].stopUrl : SOURCES[current].startUrl, { method: "POST" }).catch(() => {});
+  setTimeout(() => { refreshStatus(); refreshSessions(); }, 800);
+});
+
+snapBtn.addEventListener("click", async () => {
+  snapBtn.disabled = true;
+  snapBtn.textContent = "...";
+  try {
+    const r = await fetch(`/${TOKEN}/api/snapshot.jpg?t=${Date.now()}`);
+    if (r.ok) {
+      snapPreview.src = URL.createObjectURL(await r.blob());
+      snapPreview.style.display = "block";
+    }
+  } finally {
+    snapBtn.disabled = false;
+    snapBtn.textContent = "Snapshot";
+  }
+});
+
+// One-tap quick action for a home-screen Shortcut/bookmark: /TOKEN/?go=on or ?go=off skips the
+// button tap and returns to a clean URL, so a Siri Shortcut ("Open URL") can toggle in one step.
+// Only applies to the default (homelab) source -- add ?src=victus&go=on for the other one.
+(async function quickAction() {
+  const params = new URLSearchParams(location.search);
+  const go = params.get("go");
+  const src = params.get("src");
+  if (src && SOURCES[src]) current = src;
+  if (go === "on" || go === "off") {
+    await fetch(go === "on" ? SOURCES[current].startUrl : SOURCES[current].stopUrl, { method: "POST" }).catch(() => {});
+    history.replaceState({}, "", location.pathname);
+  }
+})();
+
+renderTabs();
+snapBtn.style.display = SOURCES[current].hasExtras ? "" : "none";
+sessionsBox.style.display = SOURCES[current].hasExtras ? "" : "none";
+refreshStatus();
+refreshSessions();
+setInterval(refreshStatus, 5000);
+setInterval(refreshSessions, 15000);
+</script>
+</body>
+</html>

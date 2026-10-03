@@ -1,0 +1,15 @@
+[Unit]
+Description=LLM reader: structured reading of the top unread stories (capped per day)
+After=docker.service
+OnFailure=notify-fail@market-intel-reader.service
+
+[Service]
+Type=oneshot
+User=ilias
+WorkingDirectory=/home/ilias/market-intel/analysis
+Environment=PATH=/home/ilias/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ilias/market-intel/analysis/.venv/bin/python reader.py --k 20
+TimeoutStartSec=15min
+CPUWeight=30
+IOSchedulingClass=idle
+MemoryHigh=1G

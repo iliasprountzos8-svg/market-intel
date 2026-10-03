@@ -1,0 +1,42 @@
+[Unit]
+Description=Camera control app (phone toggle for the home webcam live view, Tailscale-only)
+After=network-online.target tailscaled.service mediamtx.service
+Wants=tailscaled.service
+
+[Service]
+User=ilias
+WorkingDirectory=/home/ilias/services/camera
+ExecStart=/usr/bin/python3 /home/ilias/services/camera/camera_app.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+# The app spawns homelab-camera.sh detached (start_new_session=True) so its own stop/start API
+# controls the capture's lifecycle, not this service's. Default KillMode=control-group would
+# still kill it (and ffmpeg with it, uncleanly -- no session log entry, no "turned off" ntfy) on
+# every restart of this app, e.g. a code deploy, wiping out an active live-view session by
+# accident. KillMode=process limits the kill to the tracked main PID only.
+KillMode=process
+
+# Sandboxing. Deliberately NOT using PrivateDevices=true or DeviceAllow= here: the spawned
+# homelab-camera.sh -> ffmpeg needs real access to /dev/video0, and DeviceAllow= implicitly
+# switches the whole unit to a device allow-list (DevicePolicy=closed) -- getting that list
+# slightly wrong would silently break camera capture with no obvious error. Every other
+# restriction below is unrelated to device access and safe to apply.
+ProtectSystem=strict
+ReadWritePaths=/home/ilias/services/camera /tmp
+ProtectHome=read-only
+PrivateTmp=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

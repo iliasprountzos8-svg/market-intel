@@ -51,10 +51,15 @@ NLP_PY = venv_python(NLP_DIR / ".venv")
 STEPS = [
     ("scrape", SCRAPER_DIR, [SCRAPER_PY, "scrape.py"]),
     ("ingest", INGEST_DIR, [INGEST_PY, "ingest.py"]),
+    ("sec8k", INGEST_DIR, [INGEST_PY, "sec8k.py"]),
+    ("sec_form4", INGEST_DIR, [INGEST_PY, "sec_form4.py"]),
+    ("stories", ANALYSIS_DIR, [ANALYSIS_PY, "stories.py"]),
+    ("merge", ANALYSIS_DIR, [NLP_PY, "merge_stories.py"]),
     ("fetch_fulltext", SCRAPER_DIR, ["timeout", "300", SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3", "--max-seconds", "180"]),  # bounded: slow sites must not hold up the cycle
     ("classify", ANALYSIS_DIR, [ANALYSIS_PY, "cli.py", "bulk-classify", "--rule-based", "--limit", "4000"]),
     ("finbert", NLP_DIR, [NLP_PY, "score_finbert.py", "--max-minutes", "15", "--threads", "4"]),
     ("populate", ANALYSIS_DIR, [ANALYSIS_PY, "populate_cells.py", "--hours", "72"]),
+    ("form4_signal", ANALYSIS_DIR, [ANALYSIS_PY, "form4_signal.py"]),
     ("signals", ANALYSIS_DIR, [ANALYSIS_PY, "signals.py"]),
     ("correlate", ANALYSIS_DIR, [ANALYSIS_PY, "correlate.py", "--window-hours", "72"]),
     ("check_outcomes", ANALYSIS_DIR, [ANALYSIS_PY, "check_outcomes.py", "--min-age-days", "3", "--move-threshold", "0.5"]),
@@ -64,7 +69,15 @@ STEPS = [
 # signals.py keeps its own SQLite store and pushes to ntfy: only meaningful on the homelab, so it is
 # opt-in (MI_ENABLE_SIGNALS=1) and skipped on GitHub Actions.
 if os.environ.get("MI_ENABLE_SIGNALS") != "1":
-    STEPS = [st for st in STEPS if st[0] not in ("signals", "ingest", "finbert", "mirror", "populate")]
+    STEPS = [st for st in STEPS if st[0] not in ("signals", "ingest", "sec8k", "sec_form4", "stories", "merge", "finbert", "mirror", "populate", "form4_signal")]
+
+# sec_form4 / form4_signal are new (2026-09-27): proven via manual dry-run, not yet turned on in
+# the live 30-min cycle (a second full SEC submissions poll per company plus a per-filing XML
+# fetch, and a new DB table growing every cycle -- a real behavior change worth a deliberate
+# opt-in, separate from the already-live MI_ENABLE_SIGNALS steps above). Set MI_ENABLE_FORM4=1
+# once the dry-run output looks right to fold these into the regular cycle.
+if os.environ.get("MI_ENABLE_FORM4") != "1":
+    STEPS = [st for st in STEPS if st[0] not in ("sec_form4", "form4_signal")]
 
 
 def run_step(name: str, cwd: Path, cmd: list[str]) -> bool:

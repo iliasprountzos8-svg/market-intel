@@ -1,0 +1,8 @@
+# Versions match what's already installed in the homelab nlp/.venv; if you rebuild that venv
+# from scratch, run `pip freeze` there afterwards and reconcile any drift with this file.
+torch==2.4.1
+transformers==4.44.2
+sentence-transformers==3.1.1
+psycopg[binary]==3.2.1
+numpy==1.26.4
+python-dotenv==1.0.1

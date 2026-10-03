@@ -22,3 +22,11 @@ lab/.venv/
 # Deal Radar: scraped marketplace listings are data, not code (personal/third-party data, repo is public)
 deal-radar/listings_*.csv
 deal-radar/*.xlsx
+
+# Evaluation sample text and model predictions are derived from news articles: keep local
+analysis/eval/sample*_unlabeled.jsonl
+analysis/eval/reader_pred_set*.json
+
+# Scratch cache/output files written by analysis scripts at runtime
+analysis/*.log
+analysis/recent.json

@@ -15,13 +15,17 @@ NOW=$(date +%s)
 
 send() { # title prio tags msg
   if [ "${DRY:-0}" = 1 ]; then echo "[DRY] ($2) $1 :: $4"; return; fi
-  curl -s -m 10 -H "Title: $1" -H "Priority: $2" -H "Tags: $3" -d "$4" "http://100.83.128.73:8090/$(cat "$TOPIC_FILE")" >/dev/null 2>&1
+  if ! curl -sf -m 10 -H "Title: $1" -H "Priority: $2" -H "Tags: $3" -d "$4" "http://100.83.128.73:8090/$(cat "$TOPIC_FILE")" >/dev/null 2>&1; then
+    echo "$(date -Is) UNSENT: $1 :: $4" >> "$ST/unsent.log"
+    logger -t homelab-watchdog "ntfy unreachable, alert NOT delivered: $1"
+    return 1
+  fi
 }
 alert() { # key prio title msg [cooldown_s]
   local key=$1 prio=$2 title=$3 msg=$4 cool=${5:-21600} last=0
   [ -f "$ST/$key.last" ] && last=$(cat "$ST/$key.last")
   touch "$ST/$key.active"
-  if [ $((NOW-last)) -ge "$cool" ]; then send "$title" "$prio" warning "$msg"; echo "$NOW" > "$ST/$key.last"; fi
+  if [ $((NOW-last)) -ge "$cool" ]; then send "$title" "$prio" warning "$msg" && echo "$NOW" > "$ST/$key.last"; fi
 }
 ok() { # key
   if [ -f "$ST/$1.active" ]; then
@@ -75,6 +79,19 @@ if [ "$(cat "$ST/boot_id" 2>/dev/null)" != "$BOOT" ]; then
 fi
 [ "$(cut -d. -f1 /proc/uptime)" -lt 600 ] && exit 0
 
+# ---- network: IPv4 default route present? (wifi can keep an IPv6-only link after a DHCP
+# hiccup, which looks "up" but breaks every outbound call). Self-heal via dhcpcd rebind first;
+# alert only if that doesn't restore it. Delivered over Tailscale, which doesn't need this route.
+if ! ip route show default | grep -q .; then
+  for ifc in wlo1 eno1; do
+    ip link show "$ifc" 2>/dev/null | grep -q "state UP" && sudo -n dhcpcd -4 --rebind "$ifc" >/dev/null 2>&1
+  done
+  sleep 3
+fi
+if ip route show default | grep -q .; then ok net_down
+else alert net_down urgent "No IPv4 route on homelab" "wlo1/eno1 have no default IPv4 route; DHCP rebind attempted and failed. Check: ip -4 addr; nmcli device status" 1800
+fi
+
 # ---- full cycle: hung / stale ----
 read -r kind ts _ < "$MI/logs/cycle-status.txt" 2>/dev/null || { kind=none; ts=""; }
 age=$(age_of "$ts")
@@ -94,6 +111,15 @@ else
   ok db_down
   if [ "$SEC" -gt 5400 ]; then alert data_stalled high "No new articles for $((SEC/60)) min" "Newest article scraped $((SEC/60)) min ago. Feeds, network or ingest may be down."; else ok data_stalled; fi
 fi
+
+# ---- containers that are "Up" but lost their ports or network: self-heal first, then alert if it did not work ----
+heal_out=$(sudo -n /usr/local/bin/homelab-docker-heal.sh 2>&1); heal_rc=$?
+if echo "$heal_out" | grep -q "healed=[1-9]"; then
+  send "Self-heal: recreated containers" default wrench "$(echo "$heal_out" | grep -E "healed|PROBLEM" | head -4 | tr '\n' ' ')"
+fi
+if [ "$heal_rc" -eq 2 ]; then alert containers_broken urgent "Containers without ports or network" "$(echo "$heal_out" | grep -E "PROBLEM|skipped|cannot|failed" | head -3 | tr '\n' ' ')" 3600; else ok containers_broken; fi
+# the alert channel itself: if ntfy does not answer, nothing above can reach the phone
+if curl -sf -m 5 http://100.83.128.73:8090/v1/health >/dev/null 2>&1; then ok ntfy_down; else logger -t homelab-watchdog "ntfy health check FAILED"; alert ntfy_down urgent "ntfy is not answering" "The phone alert channel is down. Check: docker ps; docker logs ntfy-ntfy-1" 3600; fi
 
 # ---- services and containers ----
 bad=""

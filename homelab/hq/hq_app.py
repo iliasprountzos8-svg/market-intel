@@ -7,13 +7,12 @@ no elevated privileges. The only actions are two allow-listed jobs (pull data, g
 
 Run with the lab venv (needs psycopg, pandas, pyarrow, yfinance).
 """
-import fcntl
 import hmac
 import json
 import os
 import re
 import sqlite3
-import subprocess
+import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -25,6 +24,12 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 import psycopg
 from psycopg.rows import dict_row
+
+# joblock.py sits next to hq_app.py in the deployed layout (~/services/hq/) and one level up
+# in the repo layout (homelab/joblock.py, shared with homelab/sync_daemon.py) -- try both.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from joblock import is_running as _is_running, start_job as _start_job  # noqa: E402
 
 HOME = Path.home()
 MI = HOME / "market-intel"
@@ -156,25 +161,11 @@ def quotes():
 
 # ---------------------------------------------------------------- job control (allow-listed)
 def is_running(job):
-    try:
-        f = open(LOCKS[job], "a+")
-    except OSError:
-        return False
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(f, fcntl.LOCK_UN)
-        return False
-    except OSError:
-        return True
-    finally:
-        f.close()
+    return _is_running(LOCKS[job])
 
 
 def start_job(job):
-    if is_running(job):
-        return "already running"
-    subprocess.Popen(JOBS[job], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True, cwd=str(MI))
-    return "started"
+    return _start_job(JOBS[job], LOCKS[job], MI)
 
 
 # ---------------------------------------------------------------- API handlers
@@ -305,7 +296,14 @@ def api_system(_):
     size = q("select pg_size_pretty(pg_database_size('marketintel')) s")[0]["s"]
     calls = q("select created_at, ticker_or_theme, call, confidence, horizon_days, outcome, asset_return_pct from ai_calls_log order by created_at desc limit 15")
     tr = read_json(LOGS / "track-record.json")
-    return {"kinds": kinds, "failing": failing, "runs": runs, "perday": perday, "db_size": size, "calls": calls,
+    try:
+        dq = q("select name, value from dq_metrics where ts = (select max(ts) from dq_metrics) order by name")
+        stories = q("select s.title, s.event, s.n_sources, s.priority, r.result->>'takeaway' as takeaway from stories s "
+                    "left join story_reads r on r.story_id = s.story_id where not s.is_backfill and s.first_seen > now() - interval '24 hours' "
+                    "order by s.priority desc limit 8")
+    except Exception:  # noqa: BLE001 - tables missing on a fresh install: the rest of the page still works
+        dq, stories = [], []
+    return {"dq": dq, "stories": stories, "kinds": kinds, "failing": failing, "runs": runs, "perday": perday, "db_size": size, "calls": calls,
             "track": tr, "pull": read_text(LOGS / "cycle-status.txt"), "fast": read_text(LOGS / "fast-status.txt"), "digest": read_text(LOGS / "digest-status.txt")}
 
 

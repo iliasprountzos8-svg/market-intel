@@ -1,0 +1,36 @@
+[Unit]
+Description=mediamtx (RTSP-in/HLS-out relay for the home camera feed; idle until ffmpeg publishes)
+After=network-online.target tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+User=ilias
+WorkingDirectory=/opt/mediamtx
+ExecStart=/opt/mediamtx/mediamtx /opt/mediamtx/mediamtx.yml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+# mediamtx never touches camera hardware (only ffmpeg, in a different service, does) so it can be
+# sandboxed harder than camera-app.service. ReadWritePaths is needed because it writes its own
+# self-signed cert (auto.key/auto.crt) into its working directory on first run.
+ProtectSystem=strict
+ReadWritePaths=/opt/mediamtx
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

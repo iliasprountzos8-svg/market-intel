@@ -1,0 +1,35 @@
+{
+  "_note": "DRAFT starter theses written by Claude as generic placeholders. EDIT THEM: replace with your own reasoning and 'what would change my mind'. Research tooling only, not investment advice. 'events' are story event tags; 'keywords' match story titles (case-insensitive).",
+  "NVDA": {
+    "thesis": "DRAFT: sustained AI data-center demand keeps growth and margins high.",
+    "watch": [
+      {"label": "export controls / China", "keywords": ["export control", "export ban", "china", "license", "tariff"], "events": ["legal_reg", "geopolitics"]},
+      {"label": "customer capex or custom-chip competition", "keywords": ["capex", "custom chip", "asic", "tpu", "trainium", "amd", "data center spending"], "events": ["supply"]},
+      {"label": "results and guidance", "keywords": [], "events": ["earnings", "guidance"]}
+    ]
+  },
+  "MSFT": {
+    "thesis": "DRAFT: Azure and AI monetisation outgrow the capex burden.",
+    "watch": [
+      {"label": "AI capex vs return", "keywords": ["capex", "azure", "copilot", "data center", "openai"], "events": ["supply", "capital"]},
+      {"label": "antitrust / regulation", "keywords": ["antitrust", "ftc", "eu commission", "fine"], "events": ["legal_reg"]},
+      {"label": "results and guidance", "keywords": [], "events": ["earnings", "guidance"]}
+    ]
+  },
+  "GOOGL": {
+    "thesis": "DRAFT: search holds up against AI assistants while cloud and TPUs grow.",
+    "watch": [
+      {"label": "antitrust remedies", "keywords": ["antitrust", "doj", "remedy", "divest", "chrome", "ad tech"], "events": ["legal_reg"]},
+      {"label": "AI competition for search", "keywords": ["chatgpt", "search share", "gemini", "ai overview", "perplexity"], "events": []},
+      {"label": "cloud growth and backlog", "keywords": ["cloud", "backlog", "tpu"], "events": ["earnings", "guidance"]}
+    ]
+  },
+  "ASML": {
+    "thesis": "DRAFT: EUV monopoly benefits from leading-edge chip capex.",
+    "watch": [
+      {"label": "export restrictions", "keywords": ["export", "china", "restriction", "licence", "license", "netherlands"], "events": ["legal_reg", "geopolitics"]},
+      {"label": "orders and bookings", "keywords": ["bookings", "orders", "euv", "high-na"], "events": ["earnings", "guidance", "supply"]},
+      {"label": "customer capex (TSMC, Intel, Samsung)", "keywords": ["tsmc", "intel", "samsung", "capex"], "events": ["supply", "capital"]}
+    ]
+  }
+}

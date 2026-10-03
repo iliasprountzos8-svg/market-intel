@@ -173,6 +173,18 @@ def cmd_write_digest(client, args):
     print(json.dumps(res.data, indent=2, default=str))
 
 
+def find_recent_duplicate(client, symbol, ticker, call, horizon_days):
+    """An identical view (same symbol, same direction) logged inside the last `horizon_days` days
+    is the same bet, not new evidence: re-logging it would be scored again and inflate the hit rate."""
+    since = (datetime.now(timezone.utc) - timedelta(days=horizon_days or 5)).isoformat()
+    rows = client.table("ai_calls_log").select("id,created_at,symbol,ticker_or_theme").eq("call", call)         .gte("created_at", since).execute().data or []
+    want = {str(symbol).lower(), str(ticker).lower()}
+    for r in rows:
+        if {str(r.get("symbol") or "").lower(), str(r.get("ticker_or_theme") or "").lower()} & want:
+            return r
+    return None
+
+
 def cmd_log_call(client, args):
     """Log a directional call in a form that can be scored fairly later: symbol, horizon,
     confidence, invalidation, and the entry price captured at logging time. Columns that
@@ -194,6 +206,12 @@ def cmd_log_call(client, args):
         "entry_at": datetime.now(timezone.utc).isoformat() if entry_price else None,
     }
     payload = {k: v for k, v in payload.items() if v is not None}
+    if not getattr(args, "force", False):
+        dup = find_recent_duplicate(client, symbol or args.ticker, args.ticker, args.call, args.horizon_days)
+        if dup:
+            print(f"skipped: same view already logged {dup['created_at'][:16]} (id {str(dup['id'])[:8]}); it is still "
+                  f"inside its {args.horizon_days}-day window. Pass --force to log it anyway.", file=sys.stderr)
+            return
     for attempt in range(16):  # one column may be dropped per retry
         try:
             res = client.table("ai_calls_log").insert(payload).execute()
@@ -213,24 +231,48 @@ def cmd_log_call(client, args):
 def cmd_market_snapshot(client, args):
     """Compact price context so analysis can tell 'news' from 'already priced in'."""
     import yfinance as yf
+    import pandas as pd
 
     rows = [("NVDA", "NVDA"), ("MSFT", "MSFT"), ("GOOGL", "GOOGL"), ("ASML", "ASML"), ("VWCE.DE", "VWCE (EUR)"),
             ("VT", "Global equities (VT)"), ("^GSPC", "S&P 500"), ("^TNX", "US 10y yield"), ("CL=F", "WTI oil"),
             ("BZ=F", "Brent"), ("GC=F", "Gold"), ("DX-Y.NYB", "Dollar index")]
+    STOCKS = {"NVDA", "MSFT", "GOOGL", "ASML"}
     out = []
     for sym, name in rows:
         try:
-            s = yf.Ticker(sym).history(period="2mo")["Close"].dropna()
+            t = yf.Ticker(sym)
+            hist = t.history(period="3mo")
+            s = hist["Close"].dropna()
             if len(s) < 6:
                 continue
 
             def chg(n):
                 return (s.iloc[-1] / s.iloc[-1 - n] - 1) * 100 if len(s) > n else None
 
-            out.append({"symbol": sym, "name": name, "last": round(float(s.iloc[-1]), 2),
-                        "1d_pct": round(chg(1), 2), "5d_pct": round(chg(5), 2),
-                        "20d_pct": round(chg(20), 2) if chg(20) is not None else None,
-                        "asof": str(s.index[-1].date())})
+            entry = {"symbol": sym, "name": name, "last": round(float(s.iloc[-1]), 2),
+                     "1d_pct": round(chg(1), 2), "5d_pct": round(chg(5), 2),
+                     "20d_pct": round(chg(20), 2) if chg(20) is not None else None,
+                     "asof": str(s.index[-1].date())}
+
+            vol = hist["Volume"].dropna()
+            if len(vol) >= 21 and vol.iloc[-2::-1][:20].mean() > 0:
+                avg20 = vol.iloc[-21:-1].mean()
+                entry["volume_vs_20d_avg"] = round(float(vol.iloc[-1] / avg20), 2)
+
+            if sym in STOCKS:
+                try:
+                    cal = t.get_earnings_dates(limit=4)
+                    if cal is not None and not cal.empty:
+                        now = pd.Timestamp.now(tz=cal.index.tz)
+                        upcoming = cal.index[cal.index >= now]
+                        if len(upcoming):
+                            days_out = (upcoming[0] - now).days
+                            if days_out <= 20:
+                                entry["earnings_in_days"] = days_out
+                except Exception:  # noqa: BLE001
+                    pass
+
+            out.append(entry)
         except Exception as e:  # noqa: BLE001
             out.append({"symbol": sym, "error": str(e)[:60]})
     print(json.dumps(out, indent=1))
@@ -257,6 +299,49 @@ def cmd_lab(client, args):
     """Latest prediction-lab ranked ideas and paper-ledger results (research only). Read-only."""
     f = Path(__file__).parent.parent / "logs" / "lab-daily.json"
     print(f.read_text() if f.exists() else "{}")
+
+
+def cmd_calibration_summary(client, args):
+    """Your own track record: does stated confidence match the actual hit rate? Read this before logging new calls."""
+    res = (
+        client.table("ai_calls_log")
+        .select("confidence,outcome,call")
+        .not_.is_("outcome", "null")
+        .neq("outcome", "unclear")
+        .execute()
+    )
+    rows = [r for r in res.data if r.get("confidence") is not None]
+    if len(rows) < 5:
+        print(f"Only {len(rows)} decided calls with a confidence score so far -- too few to calibrate on. "
+              "Do not adjust confidence based on this yet.")
+        return
+
+    pairs = [(r["confidence"] / 100.0, 1 if r["outcome"] == "correct" else 0) for r in rows]
+    brier = sum((p - o) ** 2 for p, o in pairs) / len(pairs)
+    lines = [f"Resolved calls with confidence: {len(pairs)} | Brier score {brier:.3f} "
+             "(0.250 = always-50% baseline, lower is better)"]
+
+    edges = (0.0, 0.4, 0.6, 0.8, 1.01)
+    for lo, hi in zip(edges, edges[1:]):
+        sel = [(p, o) for p, o in pairs if lo <= p < hi]
+        if sel:
+            stated = sum(p for p, _ in sel) / len(sel)
+            actual = sum(o for _, o in sel) / len(sel)
+            lines.append(f"  stated {lo:.0%}-{min(hi, 1.0):.0%}: n={len(sel)}, "
+                         f"stated avg {stated:.0%} vs actual hit rate {actual:.0%}")
+
+    by_dir = {}
+    for r in rows:
+        d = by_dir.setdefault(r.get("call"), {"n": 0, "hits": 0})
+        d["n"] += 1
+        if r["outcome"] == "correct":
+            d["hits"] += 1
+    for d, s in by_dir.items():
+        lines.append(f"  direction {d}: {s['hits']}/{s['n']} correct")
+
+    if len(pairs) < 30:
+        lines.append(f"Only {len(pairs)} decided calls: treat as a weak signal, not evidence (need 30+ for real confidence).")
+    print("\n".join(lines))
 
 
 def main():
@@ -300,10 +385,11 @@ def main():
     p.add_argument("--call", required=True, choices=["bullish", "bearish", "neutral"])
     p.add_argument("--rationale")
     p.add_argument("--digest-id")
-    p.add_argument("--confidence", type=int, help="0-100 confidence score")
+    p.add_argument("--confidence", type=int, required=True, help="0-100 confidence score (required: a call without one can't be calibration-scored)")
     p.add_argument("--horizon-days", type=int, default=5, help="calendar days until the call is scored (5=short, 20=medium)")
     p.add_argument("--symbol", help="explicit price symbol (e.g. NVDA, ^TNX, VWCE.DE); resolved from --ticker if omitted")
     p.add_argument("--invalidation", help="what would prove this call wrong")
+    p.add_argument("--force", action="store_true", help="log even if the same view is already open")
     p.set_defaults(func=cmd_log_call)
 
     p = sub.add_parser("signals")
@@ -311,6 +397,9 @@ def main():
 
     p = sub.add_parser("lab")
     p.set_defaults(func=cmd_lab)
+
+    p = sub.add_parser("calibration-summary")
+    p.set_defaults(func=cmd_calibration_summary)
 
     p = sub.add_parser("market-snapshot")
     p.set_defaults(func=cmd_market_snapshot)

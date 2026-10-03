@@ -1,0 +1,10 @@
+[Unit]
+Description=Schedule for market-intel-briefing
+
+[Timer]
+OnCalendar=*-*-* 07:40:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

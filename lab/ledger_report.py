@@ -63,5 +63,5 @@ print("\n".join(lines))
 if "--notify" in sys.argv:
     topic = open(os.path.expanduser("~/services/ntfy/topic.txt")).read().strip()
     body = "\n".join(summary[:12]) + "\nResearch only. See logs/ledger-report.md"
-    subprocess.run(["curl", "-s", "-m", "10", "-H", "Title: Paper ledger weekly read", "-H", "Priority: default", "-H", "Tags: bar_chart",
+    subprocess.run(["curl", "-s", "-m", "10", "-H", "Title: Paper ledger weekly read", "-H", "Priority: min", "-H", "Tags: bar_chart",
                     "-d", body, f"http://100.83.128.73:8090/{topic}"], capture_output=True)

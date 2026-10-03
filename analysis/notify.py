@@ -231,7 +231,7 @@ def main():
                 acts.append({"action": "http", "label": "New digest", "clear": True,
                              "url": control_url.rstrip("/") + "/run/digest", "method": "POST"})
             send_ntfy("Market Intel digest ready", (d.get("summary") or "")[:900],
-                      click=dashboard_url, priority=3, tags=["newspaper"], actions=acts)
+                      click=dashboard_url, priority=4, tags=["newspaper"], actions=acts)
 
         client.table("digests").update({"notified_at": now_iso}).eq("id", d["id"]).execute()
         notified_count += 1

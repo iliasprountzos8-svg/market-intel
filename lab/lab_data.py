@@ -8,6 +8,8 @@ and exit h days later, i.e. what a person acting on the signal could actually ge
 """
 import json
 import sqlite3
+import sys
+import time
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,16 +18,28 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+sys.path.append(str(Path(__file__).parent.parent))
+from logger import get_logger  # noqa: E402
+
 warnings.filterwarnings("ignore")
+log = get_logger("lab.lab_data")
 ROOT = Path(__file__).parent.parent
 DATA = ROOT / "data"
 PRICES = DATA / "prices.parquet"
+LONG = DATA / "prices_long.parquet"  # event_study's cache: closes since 2014-12, no volume
 BENCH = ["SPY", "VT", "QQQ", "^VIX", "^TNX", "CL=F", "GC=F", "DX-Y.NYB"]
 EXTRA = ["ASML", "TSM", "ARM"]
 HORIZONS = (1, 5, 20)
 
 
 def universe():
+    """CAVEAT (survivorship bias): this is TODAY's S&P 500 membership, applied uniformly across the
+    whole backtest history in lab_wf.py. There is no point-in-time constituent history vendored or
+    fetchable here (checked: not available via yfinance or any installed package) -- a real fix is out
+    of scope for a homelab research box. This is NOT corrected, only labeled (survivorship_bias_warning
+    in lab-walkforward-*.json) plus a cheap 70%-ticker-subsample stability check on momentum-family
+    strategies (see lab_wf.subsample_robustness). Treat 'skill'/'skill_fdr' on mom/secmom/momvol as a
+    weaker claim than on strategies without this exposure."""
     sp = json.load(open(DATA / "sp500.json"))
     syms = [x["symbol"] for x in sp] + EXTRA
     sector = {x["symbol"]: x["sector"] for x in sp}
@@ -33,19 +47,46 @@ def universe():
     return syms, sector
 
 
-def _download(tickers, period):
-    df = yf.download(tickers, period=period, interval="1d", auto_adjust=True, group_by="ticker", threads=True, progress=False)
+def _download(tickers, period, attempts=3, backoff=2):
+    """Batch download with retry + exponential backoff (3 attempts: 2s/4s/8s). Per-symbol failures
+    within a successful batch response are logged (not silently swallowed); if more than 20% of the
+    batch has no usable data, that's logged as a loud warning so run_cycle can surface it."""
+    df = None
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            df = yf.download(tickers, period=period, interval="1d", auto_adjust=True, group_by="ticker", threads=True, progress=False)
+            if df is not None and not df.empty:
+                break
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            df = None
+        if attempt < attempts - 1:
+            wait = backoff * (2 ** attempt)
+            log.warning(f"lab_data._download: yfinance batch download failed/empty (attempt {attempt + 1}/{attempts}, {len(tickers)} tickers): {last_err}; retrying in {wait}s")
+            time.sleep(wait)
+    if df is None or df.empty:
+        log.warning(f"lab_data._download: yfinance batch download FAILED after {attempts} attempts for {len(tickers)} tickers: {last_err}")
+        return pd.DataFrame(columns=["date", "symbol", "close", "volume"])
     out = []
+    failed = []
     for t in tickers:
         try:
             sub = df[t][["Close", "Volume"]].dropna(subset=["Close"])
         except (KeyError, TypeError):
+            failed.append(t)
             continue
         if sub.empty:
+            failed.append(t)
             continue
         sub = sub.reset_index().rename(columns={"Date": "date", "Close": "close", "Volume": "volume"})
         sub["symbol"] = t
         out.append(sub[["date", "symbol", "close", "volume"]])
+    fail_frac = len(failed) / len(tickers) if tickers else 0.0
+    if failed:
+        log.warning(f"lab_data._download: {len(failed)}/{len(tickers)} symbols had no usable data this batch: {failed[:20]}{'...' if len(failed) > 20 else ''}")
+    if fail_frac > 0.20:
+        log.warning(f"lab_data._download: {fail_frac:.0%} of batch ({len(failed)}/{len(tickers)} symbols) failed -- this looks like a yfinance/network problem, not a handful of delisted tickers")
     return pd.concat(out) if out else pd.DataFrame(columns=["date", "symbol", "close", "volume"])
 
 
@@ -79,6 +120,17 @@ def load_wide():
     return close[valid], vol[valid]
 
 
+def load_wide_long(min_names=300):
+    """Closes since 2014-12 from event_study's cache (close only: no volume features). Same equity-day filter idea
+    as load_wide, with a lower bar because early history has fewer of today's members listed."""
+    df = pd.read_parquet(LONG)
+    df["date"] = pd.to_datetime(df["date"])
+    close = df.pivot(index="date", columns="symbol", values="close").sort_index()
+    syms, _ = universe()
+    eq = [c for c in close.columns if c in set(syms)]
+    return close[close[eq].notna().sum(axis=1) >= min_names]
+
+
 def _stack(df):
     try:
         return df.stack(future_stack=True)
@@ -102,14 +154,17 @@ def build_panel(close, vol, horizons=HORIZONS):
     feats["vol20"] = ret.rolling(20).std()
     feats["vol60"] = ret.rolling(60).std()
     feats["dd_high"] = c / c.rolling(252, min_periods=120).max() - 1
-    dv = (c * vol[cols])
-    feats["dvol_ratio"] = dv / dv.rolling(60).mean()
+    if vol is not None:  # the long-history cache has no volume
+        dv = (c * vol[cols])
+        feats["dvol_ratio"] = dv / dv.rolling(60).mean()
     spy5, spy20 = spy.pct_change(5), spy.pct_change(20)
     feats["rel5"] = feats["r5"].sub(spy5, axis=0)
     feats["rel20"] = feats["r20"].sub(spy20, axis=0)
     sec = pd.Series({s: sector.get(s, "?") for s in cols})
     r20 = feats["r20"]
     feats["sec_rel20"] = r20 - r20.T.groupby(sec).transform("mean").T
+    mom = feats["mom_12_1"]
+    feats["sec_mom_12_1"] = mom - mom.T.groupby(sec).transform("mean").T
     labels = {}
     for h in horizons:
         entry = c.shift(-1)
@@ -131,7 +186,11 @@ def cs_rank(panel, cols):
 
 
 def news_features(dates_symbols_index):
-    """News-sentiment features from signals.db (only recent history exists; NaN elsewhere)."""
+    """News-sentiment features from signals.db (only recent history exists; NaN elsewhere).
+
+    Knowledge time: snapshots are computed live from articles already scraped, so they are point-in-time.
+    Any FUTURE backfill of article features must key on articles.scraped_at (when we could first know
+    it), never published_at, or late-scraped articles leak into the past."""
     db = DATA / "signals.db"
     if not db.exists():
         return pd.DataFrame(index=dates_symbols_index)

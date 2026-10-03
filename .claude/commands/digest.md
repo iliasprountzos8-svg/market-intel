@@ -26,17 +26,26 @@ Steps:
    `python cli.py mark-processed <article_id> --sentiment bullish|bearish|neutral|mixed --relevance 0-100 --tickers TICK1,TICK2 --summary "..." --action "watch|hold|no action|..." --risk none|low|medium|elevated --confidence 0-100`
 5. Finish with one digest summarizing the whole window:
    `python cli.py write-digest --hours 24 --summary "..." --themes "theme1,theme2" --guidance "..." --watchlist '{"NVDA": "...", "GOOGL": "..."}'`
-6. Run `python notify.py` -- this is the step that actually updates the
+6. Log 2-5 CALLS so they can be scored fairly later. Each call must be specific and falsifiable:
+   `python cli.py log-call --ticker NVDA --call bullish|bearish --confidence 0-100 --horizon-days 5 --invalidation 'what would prove this wrong' --rationale '...' --digest-id <digest id>`
+   Call discipline (this is what makes the track record honest):
+   - Use a ticker or theme that maps to a tradable symbol (NVDA, MSFT, GOOGL, ASML, VWCE, S&P 500, 10-year yield, oil, gold, dollar).
+   - horizon-days: 5 for short-term, 20 for a medium-term view. Never leave it blank.
+   - Confidence is a probability you would stand behind: 50 means a coin flip. Do not inflate it. If you have no edge, do not log a call.
+   - Do not default to bullish. If the evidence in the news and in the price action points down, log a bearish call. A call that just says the market keeps rising is worth nothing.
+   - Do not repeat a call already logged in the last 5 days on the same symbol and direction.
+7. Run `python notify.py` -- this is the step that actually updates the
    live app for me: it checks `app_settings`, and if push/email are
    enabled, notifies on this new digest and any newly-marked
    high-relevance articles (idempotent via `notified_at`, so re-running
    `/digest` never double-notifies). The dashboard itself updates live via
    Supabase realtime regardless of this step -- `notify.py` is what reaches
    me outside the dashboard (phone push, email).
-7. This is a data-only task via the Supabase REST API through `cli.py` --
+8. This is a data-only task via the Supabase REST API through `cli.py` --
    don't commit, push, or modify any files in the repo.
-8. End with a plain-text summary of the digest (2-4 short paragraphs) so I
-   don't have to open the dashboard to see what you found.
+9. End with a plain-text summary of the digest (2-4 short paragraphs) plus
+   one line: "Calls logged: ..." so I don't have to open the dashboard to
+   see what you found.
 
 Gotchas from past runs, avoid repeating these:
 - Passing `--summary`/watchlist text through bash double-quotes: a literal
