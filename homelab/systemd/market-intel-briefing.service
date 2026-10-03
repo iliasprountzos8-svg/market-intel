@@ -2,6 +2,8 @@
 Description=Per-holding morning briefing to the phone
 After=docker.service
 OnFailure=notify-fail@market-intel-briefing.service
+StartLimitIntervalSec=15min
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
@@ -13,3 +15,5 @@ TimeoutStartSec=15min
 CPUWeight=30
 IOSchedulingClass=idle
 MemoryHigh=1G
+Restart=on-failure
+RestartSec=60
