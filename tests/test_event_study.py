@@ -48,3 +48,33 @@ class Overlaps(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SurvivorshipBound(unittest.TestCase):
+    R = {"side": "long", "confirmation": {"mean_pct": 0.40, "t": 4.0}}  # se = 0.10
+
+    def test_no_missing_names_leaves_result_unchanged(self):
+        b = es.survivorship_bound(self.R, 0.0)
+        self.assertAlmostEqual(b["scenarios"][1]["mean_pct"], 0.40)
+        self.assertNotIn("breakeven_R", b)
+
+    def test_blend_and_net(self):
+        b = es.survivorship_bound(self.R, 0.2, scenarios=(-1.0,))
+        s = b["scenarios"][0]
+        self.assertAlmostEqual(s["mean_pct"], 0.8 * 0.40 + 0.2 * -1.0)  # 0.12
+        self.assertAlmostEqual(s["t"], 1.2)
+        self.assertAlmostEqual(s["net_pct"], 0.12 - es.COST)
+
+    def test_breakeven_drops_t_to_two(self):
+        b = es.survivorship_bound(self.R, 0.2)
+        blended = 0.8 * 0.40 + 0.2 * b["breakeven_R"]
+        self.assertAlmostEqual(blended / 0.10, 2.0)
+
+    def test_short_side_signs(self):
+        r = {"side": "short", "confirmation": {"mean_pct": -0.40, "t": -4.0}}
+        b = es.survivorship_bound(r, 0.2, scenarios=(0.0,))
+        self.assertAlmostEqual(b["scenarios"][0]["net_pct"], 0.32 - es.COST)
+
+    def test_missing_share(self):
+        self.assertAlmostEqual(es.missing_share(400, 100), 0.2)
+        self.assertEqual(es.missing_share(0, 0), 0.0)

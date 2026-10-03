@@ -14,6 +14,8 @@ repeat events of the same stock/group inside the holding window are dropped so w
 
 Caveat printed in the output: universe = index members that still have prices (point-in-time entry dates
 applied; companies removed from the index and delisted are absent), so long-side drift is flattered.
+survivorship_bound() quantifies this: it blends in the unseen names at assumed returns and reports the
+breakeven return at which a result would stop being significant. It bounds the bias; it does not remove it.
 
 Run: python event_study.py [--refresh-prices]   -> logs/event-study.json and logs/event-study.md
 """
@@ -160,6 +162,36 @@ def analyse(ev):
     return results
 
 
+BIAS_SCENARIOS = (0.0, -1.0, -2.0)  # assumed mean excess % per event for names missing from the data
+
+
+def survivorship_bound(r, m, scenarios=BIAS_SCENARIOS):
+    """How fragile is one result to the delisted names we cannot price? Missing names are a share `m` of all
+    events; the observed mean is only the survivors' (1-m). For each assumed mean excess return R of the
+    missing names the blended mean is (1-m)*mean + m*R, rescored with the observed standard error (an
+    approximation: the missing names' variance is unknown). `breakeven_R` is the missing-name mean that
+    would make the confirmation t fall to 2. Delisted names plausibly underperform, so R <= 0 is the
+    realistic direction; for a long side this is the harmful one."""
+    c = r["confirmation"]
+    sign = 1.0 if r["side"] == "long" else -1.0
+    se = abs(c["mean_pct"] / c["t"]) if c["t"] else None
+    out = {"missing_share": m, "scenarios": []}
+    for R in scenarios:
+        blended = (1 - m) * c["mean_pct"] + m * R
+        out["scenarios"].append({"R": R, "mean_pct": blended, "t": blended / se if se else None,
+                                 "net_pct": sign * blended - COST})
+    if se and m > 0:
+        need = sign * 2 * se  # blended mean at which |t| = 2 on the chosen side
+        out["breakeven_R"] = (need - (1 - m) * c["mean_pct"]) / m
+    return out
+
+
+def missing_share(n_symbols, n_missing):
+    """Share of events assumed to come from unpriced (delisted) names: missing / (priced + missing)."""
+    total = n_symbols + n_missing
+    return n_missing / total if total else 0.0
+
+
 def report(results, meta):
     L = [f"# 8-K event study, {datetime.now(timezone.utc):%Y-%m-%d}",
          f"Events {meta['events']}, symbols {meta['symbols']}, discovery before {CONFIRM_FROM.date()}, confirmation after. "
@@ -176,6 +208,21 @@ def report(results, meta):
         d, c = r["discovery"], r["confirmation"]
         L.append(f"  {r['name']:26s} h={r['h']:>2}d disc {d['mean_pct']:+.2f}% (t={d['t']:+.1f}) | conf {c['mean_pct']:+.2f}% "
                  f"(t={c['t']:+.1f}, n={c['n']}) same_sign={r['same_sign']} confirmed={r['confirmed']}")
+    bias = meta.get("bias")
+    if bias:
+        L += ["", f"Survivorship bound: {bias['missing']} of {bias['removals']} index removals since {CONFIRM_FROM.date()} have no prices, "
+                  f"so about {bias['share']:.0%} of events are unseen. Blended confirmation mean if those names averaged R % excess per event "
+                  f"(t uses the observed SE; breakeven R = value that drops |t| to 2; None if already below 2):"]
+        held = [r for r in results if r["same_sign"]]
+        L.append(f"  (only the {len(held)} of {len(results)} tests whose sign held out-of-sample; a flipped sign fails regardless of survivorship)")
+        for r in sorted(held, key=lambda r: -abs(r["confirmation"]["t"]))[:8]:
+            b = r.get("bias_bound")
+            if not b:
+                continue
+            sc = "  ".join(f"R={s['R']:+.0f}: {s['mean_pct']:+.2f}% (t={s['t']:+.1f})" for s in b["scenarios"])
+            be = b.get("breakeven_R")
+            be = f"{be:+.1f}%" if be is not None and abs(r["confirmation"]["t"]) > 2 else "None"
+            L.append(f"  {r['name']:26s} h={r['h']:>2}d {r['side']:5s} {sc} | breakeven R {be}")
     return "\n".join(L)
 
 
@@ -200,6 +247,14 @@ def main():
     ev = drop_overlaps(build_events(events, close))
     results = analyse(ev)
     meta = {"events": int(ev[ev.group == "any"].drop_duplicates(["symbol", "entry"]).shape[0]), "symbols": int(ev.symbol.nunique())}
+    try:
+        cov = up.coverage(up.fetch_changes(), close.columns, CONFIRM_FROM.date().isoformat())
+        m = missing_share(meta["symbols"], cov["removed_without_prices"])
+        for r in results:
+            r["bias_bound"] = survivorship_bound(r, m)
+        meta["bias"] = {"removals": cov["removals_since"], "missing": cov["removed_without_prices"], "share": m}
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"event_study: survivorship bound unavailable ({e})")
     txt = report(results, meta)
     print(txt)
     (ROOT / "logs").mkdir(exist_ok=True)
