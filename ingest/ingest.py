@@ -206,7 +206,10 @@ def main():
         for i in range(0, len(upd), 200):
             client.table("sources").upsert(upd[i:i + 200], on_conflict="url").execute()
         errs = sum(1 for r in results if r[2] not in (200, 304, "skipped"))
-        client.table("source_health").insert({"source": "INGEST_ALL", "entries_fetched": new_count, "errors": errs, "skipped_domains": len(_blocked)}).execute()
+        try:
+            client.table("source_health").insert({"source": "INGEST_ALL", "entries_fetched": new_count, "errors": errs, "skipped_domains": len(_blocked)}).execute()
+        except Exception as e:  # health log is best-effort (table may be missing in the cloud DB)
+            log.warning(f"source_health insert skipped: {str(e)[:120]}")
     codes = defaultdict(int)
     for r in results:
         codes[r[2]] += 1
