@@ -3,7 +3,12 @@ name: Improvement cycle (scrape + fulltext + correlate + outcomes)
 on:
   schedule:
     - cron: "*/30 * * * *"   # every 30 minutes
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      bootstrap_sources:
+        description: "Run ingest/build_sources.py first (fills the sources registry)"
+        type: boolean
+        default: false
 
 jobs:
   cycle:
@@ -21,8 +26,19 @@ jobs:
       - name: Install analysis dependencies
         run: pip install -r analysis/requirements.txt
 
+      - name: Install ingest dependencies
+        run: pip install -r ingest/requirements.txt
+
+      - name: Bootstrap sources registry (manual runs only)
+        if: ${{ inputs.bootstrap_sources }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python ingest/build_sources.py --skip-validate
+
       - name: Run full cycle
         env:
+          MI_CLOUD_INGEST: "1"
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           NEWSAPI_KEY: ${{ secrets.NEWSAPI_KEY }}

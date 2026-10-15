@@ -50,7 +50,7 @@ NLP_PY = venv_python(NLP_DIR / ".venv")
 
 STEPS = [
     ("scrape", SCRAPER_DIR, [SCRAPER_PY, "scrape.py"]),
-    ("ingest", INGEST_DIR, [INGEST_PY, "ingest.py"]),
+    ("ingest", INGEST_DIR, [INGEST_PY, "ingest.py", "--max-minutes", "10"]),
     ("fetch_fulltext", SCRAPER_DIR, ["timeout", "240", SCRAPER_PY, "fetch_fulltext.py", "--limit", "100", "--delay", "0.3"]),  # bounded: slow sites must not hold up the cycle
     ("classify", ANALYSIS_DIR, [ANALYSIS_PY, "cli.py", "bulk-classify", "--rule-based", "--limit", "4000"]),
     ("finbert", NLP_DIR, [NLP_PY, "score_finbert.py", "--max-minutes", "15", "--threads", "4"]),
@@ -63,8 +63,13 @@ STEPS = [
 
 # signals.py keeps its own SQLite store and pushes to ntfy: only meaningful on the homelab, so it is
 # opt-in (MI_ENABLE_SIGNALS=1) and skipped on GitHub Actions.
+# MI_CLOUD_INGEST=1 (GitHub Actions) keeps the RSS/SEC ingest, which only needs Supabase; the rest stays homelab-only.
+CLOUD_INGEST = os.environ.get("MI_CLOUD_INGEST") == "1"
 if os.environ.get("MI_ENABLE_SIGNALS") != "1":
-    STEPS = [st for st in STEPS if st[0] not in ("signals", "ingest", "finbert", "mirror", "populate")]
+    drop = ("signals", "finbert", "mirror", "populate") + (() if CLOUD_INGEST else ("ingest",))
+    STEPS = [st for st in STEPS if st[0] not in drop]
+# In the cloud the ingest registry may be missing or empty: a failure there must not turn the whole cycle red.
+OPTIONAL = {"ingest"} if CLOUD_INGEST else set()
 
 
 def run_step(name: str, cwd: Path, cmd: list[str]) -> bool:
@@ -87,7 +92,7 @@ def main():
     for name, ok in results.items():
         log.info(f"  {'OK  ' if ok else 'FAIL'}  {name}")
 
-    if not all(results.values()):
+    if not all(ok for name, ok in results.items() if name not in OPTIONAL):
         sys.exit(1)
 
 
